@@ -28,18 +28,22 @@ public class GitHubProvider implements ActivityProvider {
                 for (var instance : github.instances()) {
                     try {
                         GitHub client;
+                        GitHubBuilder builder = new GitHubBuilder();
+
+                        // Set endpoint for GitHub Enterprise
                         if (instance.url().isPresent() && !instance.url().get().equals("https://api.github.com")) {
-                            // GitHub Enterprise
-                            client = new GitHubBuilder()
-                                .withEndpoint(instance.url().get())
-                                .withOAuthToken(instance.token())
-                                .build();
-                        } else {
-                            // GitHub.com
-                            client = new GitHubBuilder()
-                                .withOAuthToken(instance.token())
-                                .build();
+                            builder = builder.withEndpoint(instance.url().get());
                         }
+
+                        // Use token from config if provided, otherwise fall back to ~/.github property file
+                        if (instance.token().isPresent()) {
+                            builder = builder.withOAuthToken(instance.token().get());
+                        } else {
+                            // Read from ~/.github property file
+                            builder = builder.fromPropertyFile();
+                        }
+
+                        client = builder.build();
                         githubClients.add(client);
                         instanceNames.add(instance.name());
                     } catch (IOException e) {

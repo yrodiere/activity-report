@@ -28,7 +28,7 @@ public interface AppConfig {
             String name();
             Optional<String> url();
             Optional<String> username();
-            String token();
+            Optional<String> token();
         }
     }
 

@@ -10,13 +10,13 @@ providers:
       - name: "GitHub.com"
         url: "https://api.github.com"
         username: "your-github-username"
-        token: "${GITHUB_TOKEN}"  # Environment variable recommended
+        # token: "${GITHUB_TOKEN}"  # Optional: can be omitted to use ~/.github property file
 
       # GitHub Enterprise (optional)
       # - name: "Company GitHub Enterprise"
       #   url: "https://github.company.com/api/v3"
       #   username: "your-ghe-username"
-      #   token: "${GHE_TOKEN}"
+      #   token: "${GHE_TOKEN}"  # Optional: can be omitted to use ~/.github property file
 
   # JIRA (supports multiple instances)
   jira:
@@ -51,13 +51,21 @@ ai:
 # How to get API tokens:
 #
 # GitHub:
-#   1. Go to: https://github.com/settings/tokens
-#   2. Click "Generate new token (classic)"
-#   3. Select scopes: repo, read:user, user:email
-#   4. Copy token and set as environment variable: export GITHUB_TOKEN="your_token"
+#   Option 1: Use ~/.github property file (recommended)
+#     1. Go to: https://github.com/settings/tokens
+#     2. Click "Generate new token (classic)"
+#     3. Select scopes: repo, read:user, user:email
+#     4. Create ~/.github file with content: oauth=your_token_here
+#     5. Omit 'token' field in config.yaml to use this file
+#
+#   Option 2: Use environment variable or direct token in config
+#     1. Follow steps 1-3 above
+#     2. Set environment variable: export GITHUB_TOKEN="your_token"
+#     3. Use ${GITHUB_TOKEN} in config.yaml or paste token directly
 #
 # GitHub Enterprise:
 #   Same as GitHub, but use your enterprise instance URL
+#   Note: ~/.github property file works for GitHub.com only; use token in config for Enterprise
 #
 # JIRA Cloud:
 #   1. Go to: https://id.atlassian.com/manage-profile/security/api-tokens
