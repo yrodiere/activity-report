@@ -52,46 +52,19 @@ public class ActivityReport implements QuarkusApplication {
     /**
      * Core activity data model representing a single activity from any provider
      */
-    public static class Activity implements Comparable<Activity> {
-        private String source;        // e.g., "GitHub.com", "JIRA - Hibernate"
-        private String type;          // e.g., "commit", "issue", "pr", "message"
-        private String title;
-        private String description;
-        private String url;
-        private Instant timestamp;
-        private Map<String, Object> metadata;
+    public record Activity(
+        String source,        // e.g., "GitHub.com", "JIRA - Hibernate"
+        String type,          // e.g., "commit", "issue", "pr", "message"
+        String title,
+        String description,
+        String url,
+        Instant timestamp,
+        Map<String, Object> metadata
+    ) implements Comparable<Activity> {
 
         public Activity(String source, String type, String title, String description, String url, Instant timestamp) {
-            this.source = source;
-            this.type = type;
-            this.title = title;
-            this.description = description;
-            this.url = url;
-            this.timestamp = timestamp;
-            this.metadata = new HashMap<>();
+            this(source, type, title, description, url, timestamp, new HashMap<>());
         }
-
-        // Getters and setters
-        public String getSource() { return source; }
-        public void setSource(String source) { this.source = source; }
-
-        public String getType() { return type; }
-        public void setType(String type) { this.type = type; }
-
-        public String getTitle() { return title; }
-        public void setTitle(String title) { this.title = title; }
-
-        public String getDescription() { return description; }
-        public void setDescription(String description) { this.description = description; }
-
-        public String getUrl() { return url; }
-        public void setUrl(String url) { this.url = url; }
-
-        public Instant getTimestamp() { return timestamp; }
-        public void setTimestamp(Instant timestamp) { this.timestamp = timestamp; }
-
-        public Map<String, Object> getMetadata() { return metadata; }
-        public void setMetadata(Map<String, Object> metadata) { this.metadata = metadata; }
 
         public void addMetadata(String key, Object value) {
             this.metadata.put(key, value);
@@ -172,31 +145,12 @@ public class ActivityReport implements QuarkusApplication {
         }
 
         @JsonIgnoreProperties(ignoreUnknown = true)
-        public static class GitHubInstance {
-            @JsonProperty("name")
-            private String name;
-
-            @JsonProperty("url")
-            private String url;
-
-            @JsonProperty("username")
-            private String username;
-
-            @JsonProperty("token")
-            private String token;
-
-            public String getName() { return name; }
-            public void setName(String name) { this.name = name; }
-
-            public String getUrl() { return url; }
-            public void setUrl(String url) { this.url = url; }
-
-            public String getUsername() { return username; }
-            public void setUsername(String username) { this.username = username; }
-
-            public String getToken() { return token; }
-            public void setToken(String token) { this.token = token; }
-        }
+        public record GitHubInstance(
+            @JsonProperty("name") String name,
+            @JsonProperty("url") String url,
+            @JsonProperty("username") String username,
+            @JsonProperty("token") String token
+        ) {}
 
         @JsonIgnoreProperties(ignoreUnknown = true)
         public static class JiraConfig {
@@ -214,31 +168,12 @@ public class ActivityReport implements QuarkusApplication {
         }
 
         @JsonIgnoreProperties(ignoreUnknown = true)
-        public static class JiraInstance {
-            @JsonProperty("name")
-            private String name;
-
-            @JsonProperty("url")
-            private String url;
-
-            @JsonProperty("email")
-            private String email;
-
-            @JsonProperty("token")
-            private String token;
-
-            public String getName() { return name; }
-            public void setName(String name) { this.name = name; }
-
-            public String getUrl() { return url; }
-            public void setUrl(String url) { this.url = url; }
-
-            public String getEmail() { return email; }
-            public void setEmail(String email) { this.email = email; }
-
-            public String getToken() { return token; }
-            public void setToken(String token) { this.token = token; }
-        }
+        public record JiraInstance(
+            @JsonProperty("name") String name,
+            @JsonProperty("url") String url,
+            @JsonProperty("email") String email,
+            @JsonProperty("token") String token
+        ) {}
 
         @JsonIgnoreProperties(ignoreUnknown = true)
         public static class ZulipConfig {
@@ -256,40 +191,17 @@ public class ActivityReport implements QuarkusApplication {
         }
 
         @JsonIgnoreProperties(ignoreUnknown = true)
-        public static class ZulipInstance {
-            @JsonProperty("url")
-            private String url;
-
-            @JsonProperty("email")
-            private String email;
-
-            @JsonProperty("api_key")
-            private String apiKey;
-
-            public String getUrl() { return url; }
-            public void setUrl(String url) { this.url = url; }
-
-            public String getEmail() { return email; }
-            public void setEmail(String email) { this.email = email; }
-
-            public String getApiKey() { return apiKey; }
-            public void setApiKey(String apiKey) { this.apiKey = apiKey; }
-        }
+        public record ZulipInstance(
+            @JsonProperty("url") String url,
+            @JsonProperty("email") String email,
+            @JsonProperty("api_key") String apiKey
+        ) {}
 
         @JsonIgnoreProperties(ignoreUnknown = true)
-        public static class AIConfig {
-            @JsonProperty("url")
-            private String url;
-
-            @JsonProperty("model")
-            private String model;
-
-            public String getUrl() { return url; }
-            public void setUrl(String url) { this.url = url; }
-
-            public String getModel() { return model; }
-            public void setModel(String model) { this.model = model; }
-        }
+        public record AIConfig(
+            @JsonProperty("url") String url,
+            @JsonProperty("model") String model
+        ) {}
     }
 
     // ============================================================================
@@ -330,10 +242,10 @@ public class ActivityReport implements QuarkusApplication {
 
         private String expandEnvironmentVariables(String content) {
             // Replace ${ENV_VAR} with actual environment variable values
-            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\$\\{([^}]+)\\}");
-            java.util.regex.Matcher matcher = pattern.matcher(content);
+            var pattern = java.util.regex.Pattern.compile("\\$\\{([^}]+)\\}");
+            var matcher = pattern.matcher(content);
 
-            StringBuffer result = new StringBuffer();
+            var result = new StringBuffer();
             while (matcher.find()) {
                 String envVar = matcher.group(1);
                 String value = System.getenv(envVar);
@@ -412,22 +324,22 @@ public class ActivityReport implements QuarkusApplication {
                 for (Config.GitHubInstance instance : config.getProviders().getGithub().getInstances()) {
                     try {
                         GitHub client;
-                        if (instance.getUrl() != null && !instance.getUrl().equals("https://api.github.com")) {
+                        if (instance.url() != null && !instance.url().equals("https://api.github.com")) {
                             // GitHub Enterprise
                             client = new GitHubBuilder()
-                                .withEndpoint(instance.getUrl())
-                                .withOAuthToken(instance.getToken())
+                                .withEndpoint(instance.url())
+                                .withOAuthToken(instance.token())
                                 .build();
                         } else {
                             // GitHub.com
                             client = new GitHubBuilder()
-                                .withOAuthToken(instance.getToken())
+                                .withOAuthToken(instance.token())
                                 .build();
                         }
                         githubClients.add(client);
-                        instanceNames.add(instance.getName());
+                        instanceNames.add(instance.name());
                     } catch (IOException e) {
-                        System.err.println("Warning: Failed to initialize GitHub instance " + instance.getName() + ": " + e.getMessage());
+                        System.err.println("Warning: Failed to initialize GitHub instance " + instance.name() + ": " + e.getMessage());
                     }
                 }
             }
@@ -487,9 +399,9 @@ public class ActivityReport implements QuarkusApplication {
             String source = "GitHub - " + instanceName;
             Instant timestamp = event.getCreatedAt().toInstant();
 
-            switch (event.getType()) {
-                case PUSH:
-                    GHEventPayload.Push pushPayload = event.getPayload(GHEventPayload.Push.class);
+            return switch (event.getType()) {
+                case PUSH -> {
+                    var pushPayload = event.getPayload(GHEventPayload.Push.class);
                     if (pushPayload != null && pushPayload.getCommits() != null) {
                         int commitCount = pushPayload.getCommits().size();
                         String ref = pushPayload.getRef();
@@ -498,7 +410,7 @@ public class ActivityReport implements QuarkusApplication {
 
                         String repoUrl = "";
                         try {
-                            GHRepository repo = pushPayload.getRepository();
+                            var repo = pushPayload.getRepository();
                             if (repo != null) {
                                 repoUrl = repo.getHtmlUrl().toString();
                             }
@@ -506,7 +418,7 @@ public class ActivityReport implements QuarkusApplication {
                             // Ignore if repo URL not available
                         }
 
-                        return new Activity(
+                        yield new Activity(
                             source,
                             "push",
                             "Pushed " + commitCount + " commit" + (commitCount > 1 ? "s" : "") + " to " + branch,
@@ -517,15 +429,16 @@ public class ActivityReport implements QuarkusApplication {
                             timestamp
                         );
                     }
-                    break;
+                    yield null;
+                }
 
-                case PULL_REQUEST:
-                    GHEventPayload.PullRequest prPayload = event.getPayload(GHEventPayload.PullRequest.class);
+                case PULL_REQUEST -> {
+                    var prPayload = event.getPayload(GHEventPayload.PullRequest.class);
                     if (prPayload != null && prPayload.getPullRequest() != null) {
-                        GHPullRequest pr = prPayload.getPullRequest();
+                        var pr = prPayload.getPullRequest();
                         String action = prPayload.getAction();
 
-                        return new Activity(
+                        yield new Activity(
                             source,
                             "pull_request",
                             action.substring(0, 1).toUpperCase() + action.substring(1) + " PR #" + pr.getNumber() + ": " + pr.getTitle(),
@@ -534,15 +447,16 @@ public class ActivityReport implements QuarkusApplication {
                             timestamp
                         );
                     }
-                    break;
+                    yield null;
+                }
 
-                case ISSUES:
-                    GHEventPayload.Issue issuePayload = event.getPayload(GHEventPayload.Issue.class);
+                case ISSUES -> {
+                    var issuePayload = event.getPayload(GHEventPayload.Issue.class);
                     if (issuePayload != null && issuePayload.getIssue() != null) {
-                        GHIssue issue = issuePayload.getIssue();
+                        var issue = issuePayload.getIssue();
                         String action = issuePayload.getAction();
 
-                        return new Activity(
+                        yield new Activity(
                             source,
                             "issue",
                             action.substring(0, 1).toUpperCase() + action.substring(1) + " issue #" + issue.getNumber() + ": " + issue.getTitle(),
@@ -551,15 +465,16 @@ public class ActivityReport implements QuarkusApplication {
                             timestamp
                         );
                     }
-                    break;
+                    yield null;
+                }
 
-                case ISSUE_COMMENT:
-                    GHEventPayload.IssueComment commentPayload = event.getPayload(GHEventPayload.IssueComment.class);
+                case ISSUE_COMMENT -> {
+                    var commentPayload = event.getPayload(GHEventPayload.IssueComment.class);
                     if (commentPayload != null && commentPayload.getComment() != null) {
-                        GHIssueComment comment = commentPayload.getComment();
-                        GHIssue commentIssue = commentPayload.getIssue();
+                        var comment = commentPayload.getComment();
+                        var commentIssue = commentPayload.getIssue();
 
-                        return new Activity(
+                        yield new Activity(
                             source,
                             "comment",
                             "Commented on " + (commentIssue.isPullRequest() ? "PR" : "issue") + " #" + commentIssue.getNumber(),
@@ -568,15 +483,16 @@ public class ActivityReport implements QuarkusApplication {
                             timestamp
                         );
                     }
-                    break;
+                    yield null;
+                }
 
-                case PULL_REQUEST_REVIEW:
-                    GHEventPayload.PullRequestReview reviewPayload = event.getPayload(GHEventPayload.PullRequestReview.class);
+                case PULL_REQUEST_REVIEW -> {
+                    var reviewPayload = event.getPayload(GHEventPayload.PullRequestReview.class);
                     if (reviewPayload != null && reviewPayload.getReview() != null) {
-                        GHPullRequestReview review = reviewPayload.getReview();
-                        GHPullRequest reviewPR = reviewPayload.getPullRequest();
+                        var review = reviewPayload.getReview();
+                        var reviewPR = reviewPayload.getPullRequest();
 
-                        return new Activity(
+                        yield new Activity(
                             source,
                             "review",
                             "Reviewed PR #" + reviewPR.getNumber() + ": " + reviewPR.getTitle(),
@@ -585,15 +501,16 @@ public class ActivityReport implements QuarkusApplication {
                             timestamp
                         );
                     }
-                    break;
+                    yield null;
+                }
 
-                case PULL_REQUEST_REVIEW_COMMENT:
-                    GHEventPayload.PullRequestReviewComment reviewCommentPayload = event.getPayload(GHEventPayload.PullRequestReviewComment.class);
+                case PULL_REQUEST_REVIEW_COMMENT -> {
+                    var reviewCommentPayload = event.getPayload(GHEventPayload.PullRequestReviewComment.class);
                     if (reviewCommentPayload != null && reviewCommentPayload.getComment() != null) {
-                        GHPullRequestReviewComment reviewComment = reviewCommentPayload.getComment();
-                        GHPullRequest commentPR = reviewCommentPayload.getPullRequest();
+                        var reviewComment = reviewCommentPayload.getComment();
+                        var commentPR = reviewCommentPayload.getPullRequest();
 
-                        return new Activity(
+                        yield new Activity(
                             source,
                             "review_comment",
                             "Commented on PR #" + commentPR.getNumber() + " review",
@@ -602,14 +519,15 @@ public class ActivityReport implements QuarkusApplication {
                             timestamp
                         );
                     }
-                    break;
+                    yield null;
+                }
 
-                case RELEASE:
-                    GHEventPayload.Release releasePayload = event.getPayload(GHEventPayload.Release.class);
+                case RELEASE -> {
+                    var releasePayload = event.getPayload(GHEventPayload.Release.class);
                     if (releasePayload != null && releasePayload.getRelease() != null) {
-                        GHRelease release = releasePayload.getRelease();
+                        var release = releasePayload.getRelease();
 
-                        return new Activity(
+                        yield new Activity(
                             source,
                             "release",
                             "Published release " + release.getTagName(),
@@ -618,10 +536,11 @@ public class ActivityReport implements QuarkusApplication {
                             timestamp
                         );
                     }
-                    break;
-            }
+                    yield null;
+                }
 
-            return null;
+                default -> null;
+            };
         }
     }
 
@@ -631,19 +550,7 @@ public class ActivityReport implements QuarkusApplication {
     public static class JiraProvider implements ActivityProvider {
         private final List<JiraInstance> instances;
 
-        private static class JiraInstance {
-            final String name;
-            final String url;
-            final String email;
-            final String token;
-
-            JiraInstance(String name, String url, String email, String token) {
-                this.name = name;
-                this.url = url;
-                this.email = email;
-                this.token = token;
-            }
-        }
+        private record JiraInstance(String name, String url, String email, String token) {}
 
         public JiraProvider(Config config) {
             this.instances = new ArrayList<>();
@@ -654,10 +561,10 @@ public class ActivityReport implements QuarkusApplication {
 
                 for (Config.JiraInstance instance : config.getProviders().getJira().getInstances()) {
                     instances.add(new JiraInstance(
-                        instance.getName(),
-                        instance.getUrl(),
-                        instance.getEmail(),
-                        instance.getToken()
+                        instance.name(),
+                        instance.url(),
+                        instance.email(),
+                        instance.token()
                     ));
                 }
             }
@@ -692,31 +599,31 @@ public class ActivityReport implements QuarkusApplication {
             List<Activity> activities = new ArrayList<>();
 
             // Create Basic Auth header
-            String auth = Base64.getEncoder().encodeToString(
+            var auth = Base64.getEncoder().encodeToString(
                 (instance.email + ":" + instance.token).getBytes()
             );
 
             // Build JQL query
             long daysAgo = Duration.between(startDate, Instant.now()).toDays();
-            String jql = String.format("assignee = currentUser() AND updated >= -%dd ORDER BY updated DESC", daysAgo + 1);
+            var jql = String.format("assignee = currentUser() AND updated >= -%dd ORDER BY updated DESC", daysAgo + 1);
 
             // Make HTTP request using java.net.http
-            java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+            var httpClient = java.net.http.HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
 
-            String url = instance.url + "/rest/api/3/search?jql=" +
+            var url = instance.url + "/rest/api/3/search?jql=" +
                 java.net.URLEncoder.encode(jql, java.nio.charset.StandardCharsets.UTF_8) +
                 "&fields=key,summary,status,created,updated,issuetype&maxResults=100";
 
-            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+            var request = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(url))
                 .header("Authorization", "Basic " + auth)
                 .header("Accept", "application/json")
                 .GET()
                 .build();
 
-            java.net.http.HttpResponse<String> response = httpClient.send(
+            var response = httpClient.send(
                 request,
                 java.net.http.HttpResponse.BodyHandlers.ofString()
             );
@@ -726,9 +633,9 @@ public class ActivityReport implements QuarkusApplication {
             }
 
             // Parse JSON response
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode root = mapper.readTree(response.body());
-            JsonNode issues = root.get("issues");
+            var mapper = new ObjectMapper();
+            var root = mapper.readTree(response.body());
+            var issues = root.get("issues");
 
             if (issues != null && issues.isArray()) {
                 for (JsonNode issue : issues) {
@@ -770,17 +677,7 @@ public class ActivityReport implements QuarkusApplication {
     public static class ZulipProvider implements ActivityProvider {
         private final List<ZulipInstance> instances;
 
-        private static class ZulipInstance {
-            final String url;
-            final String email;
-            final String apiKey;
-
-            ZulipInstance(String url, String email, String apiKey) {
-                this.url = url;
-                this.email = email;
-                this.apiKey = apiKey;
-            }
-        }
+        private record ZulipInstance(String url, String email, String apiKey) {}
 
         public ZulipProvider(Config config) {
             this.instances = new ArrayList<>();
@@ -791,9 +688,9 @@ public class ActivityReport implements QuarkusApplication {
 
                 for (Config.ZulipInstance instance : config.getProviders().getZulip().getInstances()) {
                     instances.add(new ZulipInstance(
-                        instance.getUrl(),
-                        instance.getEmail(),
-                        instance.getApiKey()
+                        instance.url(),
+                        instance.email(),
+                        instance.apiKey()
                     ));
                 }
             }
@@ -828,22 +725,22 @@ public class ActivityReport implements QuarkusApplication {
             List<Activity> activities = new ArrayList<>();
 
             // Get current user ID first
-            java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+            var httpClient = java.net.http.HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
 
-            String auth = Base64.getEncoder().encodeToString(
+            var auth = Base64.getEncoder().encodeToString(
                 (instance.email + ":" + instance.apiKey).getBytes()
             );
 
             // Get current user
-            java.net.http.HttpRequest userRequest = java.net.http.HttpRequest.newBuilder()
+            var userRequest = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(instance.url + "/api/v1/users/me"))
                 .header("Authorization", "Basic " + auth)
                 .GET()
                 .build();
 
-            java.net.http.HttpResponse<String> userResponse = httpClient.send(
+            var userResponse = httpClient.send(
                 userRequest,
                 java.net.http.HttpResponse.BodyHandlers.ofString()
             );
@@ -852,22 +749,22 @@ public class ActivityReport implements QuarkusApplication {
                 throw new IOException("Zulip API returned status " + userResponse.statusCode());
             }
 
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode userRoot = mapper.readTree(userResponse.body());
+            var mapper = new ObjectMapper();
+            var userRoot = mapper.readTree(userResponse.body());
             int userId = userRoot.get("user_id").asInt();
 
             // Fetch messages sent by this user
-            String narrow = String.format("[{\"operator\":\"sender\",\"operand\":%d}]", userId);
-            String messagesUrl = instance.url + "/api/v1/messages?anchor=newest&num_before=1000&num_after=0&narrow=" +
+            var narrow = String.format("[{\"operator\":\"sender\",\"operand\":%d}]", userId);
+            var messagesUrl = instance.url + "/api/v1/messages?anchor=newest&num_before=1000&num_after=0&narrow=" +
                 java.net.URLEncoder.encode(narrow, java.nio.charset.StandardCharsets.UTF_8);
 
-            java.net.http.HttpRequest messagesRequest = java.net.http.HttpRequest.newBuilder()
+            var messagesRequest = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(messagesUrl))
                 .header("Authorization", "Basic " + auth)
                 .GET()
                 .build();
 
-            java.net.http.HttpResponse<String> messagesResponse = httpClient.send(
+            var messagesResponse = httpClient.send(
                 messagesRequest,
                 java.net.http.HttpResponse.BodyHandlers.ofString()
             );
@@ -876,8 +773,8 @@ public class ActivityReport implements QuarkusApplication {
                 throw new IOException("Zulip messages API returned status " + messagesResponse.statusCode());
             }
 
-            JsonNode messagesRoot = mapper.readTree(messagesResponse.body());
-            JsonNode messages = messagesRoot.get("messages");
+            var messagesRoot = mapper.readTree(messagesResponse.body());
+            var messages = messagesRoot.get("messages");
 
             if (messages != null && messages.isArray()) {
                 for (JsonNode message : messages) {
@@ -943,11 +840,11 @@ public class ActivityReport implements QuarkusApplication {
 
             // Sort activities by timestamp (most recent first)
             List<Activity> sortedActivities = new ArrayList<>(activities);
-            sortedActivities.sort(Comparator.comparing(Activity::getTimestamp).reversed());
+            sortedActivities.sort(Comparator.comparing(Activity::timestamp).reversed());
 
             // Group by source
             Map<String, List<Activity>> bySource = sortedActivities.stream()
-                .collect(Collectors.groupingBy(Activity::getSource, LinkedHashMap::new, Collectors.toList()));
+                .collect(Collectors.groupingBy(Activity::source, LinkedHashMap::new, Collectors.toList()));
 
             // Generate report sections by source
             for (Map.Entry<String, List<Activity>> entry : bySource.entrySet()) {
@@ -958,7 +855,7 @@ public class ActivityReport implements QuarkusApplication {
 
                 // Further group by type within source
                 Map<String, List<Activity>> byType = sourceActivities.stream()
-                    .collect(Collectors.groupingBy(Activity::getType, LinkedHashMap::new, Collectors.toList()));
+                    .collect(Collectors.groupingBy(Activity::type, LinkedHashMap::new, Collectors.toList()));
 
                 for (Map.Entry<String, List<Activity>> typeEntry : byType.entrySet()) {
                     String type = typeEntry.getKey();
@@ -968,17 +865,17 @@ public class ActivityReport implements QuarkusApplication {
 
                     for (Activity activity : typeActivities) {
                         report.append(String.format("- **[%s]** ",
-                            dateTimeFormatter.format(activity.getTimestamp())));
+                            dateTimeFormatter.format(activity.timestamp())));
 
-                        if (activity.getUrl() != null && !activity.getUrl().isEmpty()) {
+                        if (activity.url() != null && !activity.url().isEmpty()) {
                             report.append(String.format("[%s](%s)",
-                                activity.getTitle(), activity.getUrl()));
+                                activity.title(), activity.url()));
                         } else {
-                            report.append(activity.getTitle());
+                            report.append(activity.title());
                         }
 
-                        if (activity.getDescription() != null && !activity.getDescription().isEmpty()) {
-                            String desc = activity.getDescription();
+                        if (activity.description() != null && !activity.description().isEmpty()) {
+                            String desc = activity.description();
                             // Truncate long descriptions
                             if (desc.length() > 150) {
                                 desc = desc.substring(0, 150) + "...";
@@ -1018,13 +915,13 @@ public class ActivityReport implements QuarkusApplication {
         private final ObjectMapper mapper;
 
         public AIProcessor(Config config) {
-            this.aiUrl = config.getAi() != null && config.getAi().getUrl() != null ?
-                config.getAi().getUrl() : "http://localhost:8000/v1";
+            this.aiUrl = config.getAi() != null && config.getAi().url() != null ?
+                config.getAi().url() : "http://localhost:8000/v1";
             this.mapper = new ObjectMapper();
             this.mapper.registerModule(new JavaTimeModule());
 
             // Auto-detect model if not specified
-            String configuredModel = config.getAi() != null ? config.getAi().getModel() : null;
+            String configuredModel = config.getAi() != null ? config.getAi().model() : null;
             if (configuredModel == null || configuredModel.equals("auto")) {
                 this.modelName = detectModel();
             } else {
@@ -1038,26 +935,26 @@ public class ActivityReport implements QuarkusApplication {
 
         private String detectModel() {
             try {
-                java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+                var httpClient = java.net.http.HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(10))
                     .build();
 
-                java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                var request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(aiUrl + "/models"))
                     .header("Accept", "application/json")
                     .GET()
                     .build();
 
-                java.net.http.HttpResponse<String> response = httpClient.send(
+                var response = httpClient.send(
                     request,
                     java.net.http.HttpResponse.BodyHandlers.ofString()
                 );
 
                 if (response.statusCode() == 200) {
-                    JsonNode root = mapper.readTree(response.body());
-                    JsonNode data = root.get("data");
-                    if (data != null && data.isArray() && data.size() > 0) {
-                        String model = data.get(0).get("id").asText();
+                    var root = mapper.readTree(response.body());
+                    var data = root.get("data");
+                    if (data != null && data.isArray() && !data.isEmpty()) {
+                        var model = data.get(0).get("id").asText();
                         System.err.println("Auto-detected AI model: " + model);
                         return model;
                     }
@@ -1082,28 +979,35 @@ public class ActivityReport implements QuarkusApplication {
                 DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("MMMM d, yyyy")
                     .withZone(ZoneId.systemDefault());
 
-                String prompt = String.format(
-                    "You are analyzing a developer's activity from %s to %s.\n\n" +
-                    "Your task is to create a concise, achievement-oriented activity report. " +
-                    "Group related activities into coherent achievements. For example, an issue, pull request, " +
-                    "and commits related to the same feature should be grouped together as one achievement.\n\n" +
-                    "Guidelines:\n" +
-                    "- Focus on WHAT was accomplished, not just listing actions\n" +
-                    "- Group related items (e.g., issue + PR + commits = one achievement)\n" +
-                    "- Use clear, professional language\n" +
-                    "- Include relevant links from the activities\n" +
-                    "- Be concise but informative\n\n" +
-                    "Activities data (JSON):\n%s\n\n" +
-                    "Generate a markdown report with:\n" +
-                    "1. A brief summary paragraph (2-3 sentences)\n" +
-                    "2. Main achievements grouped by theme (use ## headers)\n" +
-                    "3. Include links to relevant issues/PRs where available\n" +
-                    "4. Keep it professional and concise\n\n" +
-                    "Return ONLY the markdown report, nothing else.",
-                    dateFormatter.format(startDate),
-                    dateFormatter.format(endDate),
-                    activitiesJson
-                );
+                String prompt = """
+                    You are analyzing a developer's activity from %s to %s.
+
+                    Your task is to create a concise, achievement-oriented activity report. \
+                    Group related activities into coherent achievements. For example, an issue, pull request, \
+                    and commits related to the same feature should be grouped together as one achievement.
+
+                    Guidelines:
+                    - Focus on WHAT was accomplished, not just listing actions
+                    - Group related items (e.g., issue + PR + commits = one achievement)
+                    - Use clear, professional language
+                    - Include relevant links from the activities
+                    - Be concise but informative
+
+                    Activities data (JSON):
+                    %s
+
+                    Generate a markdown report with:
+                    1. A brief summary paragraph (2-3 sentences)
+                    2. Main achievements grouped by theme (use ## headers)
+                    3. Include links to relevant issues/PRs where available
+                    4. Keep it professional and concise
+
+                    Return ONLY the markdown report, nothing else.
+                    """.formatted(
+                        dateFormatter.format(startDate),
+                        dateFormatter.format(endDate),
+                        activitiesJson
+                    );
 
                 // Make API call
                 return callAIModel(prompt);
@@ -1118,24 +1022,24 @@ public class ActivityReport implements QuarkusApplication {
         private String serializeActivities(List<Activity> activities) throws Exception {
             // Create simplified JSON representation of activities
             List<Map<String, Object>> simplified = activities.stream()
-                .sorted(Comparator.comparing(Activity::getTimestamp).reversed())
+                .sorted(Comparator.comparing(Activity::timestamp).reversed())
                 .map(activity -> {
                     Map<String, Object> map = new LinkedHashMap<>();
-                    map.put("source", activity.getSource());
-                    map.put("type", activity.getType());
-                    map.put("title", activity.getTitle());
-                    if (activity.getDescription() != null && !activity.getDescription().isEmpty()) {
+                    map.put("source", activity.source());
+                    map.put("type", activity.type());
+                    map.put("title", activity.title());
+                    if (activity.description() != null && !activity.description().isEmpty()) {
                         // Truncate very long descriptions
-                        String desc = activity.getDescription();
+                        String desc = activity.description();
                         if (desc.length() > 500) {
                             desc = desc.substring(0, 500) + "...";
                         }
                         map.put("description", desc);
                     }
-                    if (activity.getUrl() != null && !activity.getUrl().isEmpty()) {
-                        map.put("url", activity.getUrl());
+                    if (activity.url() != null && !activity.url().isEmpty()) {
+                        map.put("url", activity.url());
                     }
-                    map.put("timestamp", activity.getTimestamp().toString());
+                    map.put("timestamp", activity.timestamp().toString());
                     return map;
                 })
                 .collect(Collectors.toList());
@@ -1144,12 +1048,12 @@ public class ActivityReport implements QuarkusApplication {
         }
 
         private String callAIModel(String prompt) throws Exception {
-            java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+            var httpClient = java.net.http.HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
 
             // Build request body
-            Map<String, Object> requestBody = new LinkedHashMap<>();
+            var requestBody = new LinkedHashMap<String, Object>();
             requestBody.put("model", modelName);
             requestBody.put("messages", List.of(
                 Map.of("role", "user", "content", prompt)
@@ -1157,9 +1061,9 @@ public class ActivityReport implements QuarkusApplication {
             requestBody.put("temperature", 0.7);
             requestBody.put("max_tokens", 2000);
 
-            String requestJson = mapper.writeValueAsString(requestBody);
+            var requestJson = mapper.writeValueAsString(requestBody);
 
-            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+            var request = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(aiUrl + "/chat/completions"))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
@@ -1167,7 +1071,7 @@ public class ActivityReport implements QuarkusApplication {
                 .timeout(Duration.ofMinutes(2))
                 .build();
 
-            java.net.http.HttpResponse<String> response = httpClient.send(
+            var response = httpClient.send(
                 request,
                 java.net.http.HttpResponse.BodyHandlers.ofString()
             );
@@ -1177,10 +1081,10 @@ public class ActivityReport implements QuarkusApplication {
             }
 
             // Parse response
-            JsonNode root = mapper.readTree(response.body());
-            JsonNode choices = root.get("choices");
-            if (choices != null && choices.isArray() && choices.size() > 0) {
-                JsonNode message = choices.get(0).get("message");
+            var root = mapper.readTree(response.body());
+            var choices = root.get("choices");
+            if (choices != null && choices.isArray() && !choices.isEmpty()) {
+                var message = choices.get(0).get("message");
                 if (message != null) {
                     return message.get("content").asText();
                 }
