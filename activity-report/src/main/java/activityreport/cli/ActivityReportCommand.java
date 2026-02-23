@@ -49,8 +49,12 @@ public class ActivityReportCommand implements Runnable {
      * Validate the configuration to ensure at least one provider is enabled and properly configured.
      */
     private void validateConfig() {
-        if (config.providers() == null) {
-            throw new IllegalStateException("No providers configured");
+        if (config == null || config.providers() == null) {
+            throw new IllegalStateException(
+                "Configuration file not found. Please create a configuration file at: " +
+                activityreport.config.XdgYamlConfigSourceFactory.getDefaultConfigPath() + "\n" +
+                "See config.yaml.example for reference."
+            );
         }
 
         // Check if at least one provider is enabled

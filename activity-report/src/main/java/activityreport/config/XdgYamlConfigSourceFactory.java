@@ -30,14 +30,12 @@ public class XdgYamlConfigSourceFactory implements ConfigSourceFactory {
                 YamlConfigSource yamlSource = new YamlConfigSource(configPath.toUri().toURL(), 275);
                 return Collections.singletonList(yamlSource);
             } catch (IOException e) {
-                throw new IllegalStateException("Failed to load configuration from " + configPath + ": " + e.getMessage(), e);
+                // Don't fail during build - the application will validate at runtime
+                System.err.println("Warning: Failed to load configuration from " + configPath + ": " + e.getMessage());
             }
-        } else {
-            throw new IllegalStateException(
-                "Configuration file not found. Looked in: " + configPath +
-                "\nPlease create a configuration file. See config.yaml.example for reference."
-            );
         }
+        // Return empty list to allow build to succeed - runtime validation will catch missing config
+        return Collections.emptyList();
     }
 
     @Override
@@ -50,7 +48,7 @@ public class XdgYamlConfigSourceFactory implements ConfigSourceFactory {
     /**
      * Get the default configuration file path following XDG Base Directory Specification.
      */
-    private Path getDefaultConfigPath() {
+    public static Path getDefaultConfigPath() {
         String xdgConfigHome = System.getenv("XDG_CONFIG_HOME");
         if (xdgConfigHome != null && !xdgConfigHome.isEmpty()) {
             return Paths.get(xdgConfigHome, "activity-report", "config.yaml");
