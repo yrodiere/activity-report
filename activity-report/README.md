@@ -33,9 +33,15 @@ A command-line tool that generates intelligent activity reports from multiple so
 
 2. **Clone or download** this repository
 
-3. **Make the script executable** (optional):
+3. **Add to PATH** (recommended):
    ```bash
-   chmod +x ActivityReport.java
+   # Add this to your ~/.bashrc or ~/.zshrc
+   export PATH="$PATH:/path/to/productivity/bin"
+   ```
+
+   Then reload your shell or run:
+   ```bash
+   source ~/.bashrc  # or ~/.zshrc
    ```
 
 ## Configuration
@@ -91,47 +97,47 @@ The tool will auto-detect the available model. If AI Lab is not running, the too
 
 Generate a report for the last 7 days:
 ```bash
-jbang ActivityReport.java
+report
 ```
 
 ### Specify Number of Days
 
 ```bash
 # Last 14 days
-jbang ActivityReport.java --days 14
+report --days 14
 
 # Last 30 days
-jbang ActivityReport.java -d 30
+report -d 30
 ```
 
 ### Custom Date Range
 
 ```bash
-jbang ActivityReport.java --start-date 2024-02-01 --end-date 2024-02-15
+report --start-date 2024-02-01 --end-date 2024-02-15
 ```
 
 ### Disable AI Processing
 
 ```bash
-jbang ActivityReport.java --no-ai
+report --no-ai
 ```
 
 ### Custom Configuration File
 
 ```bash
-jbang ActivityReport.java --config /path/to/custom-config.yaml
+report --config /path/to/custom-config.yaml
 ```
 
 ### Save Report to File
 
 ```bash
-jbang ActivityReport.java > report.md
+report > report.md
 ```
 
 ### Full Command Reference
 
 ```bash
-jbang ActivityReport.java --help
+report --help
 ```
 
 Options:
@@ -251,12 +257,18 @@ providers:
 
 ## Development
 
-### Building from Source
+### Running from Source
 
-The tool is a single JBang script, so no build is necessary. Just run:
+The tool is a single JBang script, so no build is necessary. You can use the `report` wrapper in `bin/`:
 
 ```bash
-jbang activity-report.java
+bin/report
+```
+
+Or run the JBang script directly:
+
+```bash
+jbang activity-report/ActivityReport.java
 ```
 
 ### Adding New Providers
