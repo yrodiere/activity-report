@@ -4,20 +4,20 @@
 //DEPS io.quarkus:quarkus-picocli
 //DEPS io.quarkus:quarkus-config-yaml
 //DEPS org.kohsuke:github-api:1.321
-//DEPS com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.2
 //DEPS com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.18.2
 //JAVAC_OPTIONS -parameters
 //JAVA_OPTIONS -Djava.util.logging.manager=org.jboss.logmanager.LogManager
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.QuarkusApplication;
 import io.quarkus.runtime.annotations.QuarkusMain;
+import io.smallrye.config.ConfigMapping;
+import io.smallrye.config.SmallRyeConfig;
+import io.smallrye.config.SmallRyeConfigBuilder;
+import io.smallrye.config.source.yaml.YamlConfigSource;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.kohsuke.github.*;
@@ -26,6 +26,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
 import java.io.IOException;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.*;
@@ -43,6 +44,137 @@ public class ActivityReport implements QuarkusApplication {
 
     public static void main(String... args) {
         Quarkus.run(ActivityReport.class, args);
+    }
+
+    // ============================================================================
+    // CONFIGURATION
+    // ============================================================================
+
+    /**
+     * Main configuration interface using Quarkus ConfigMapping
+     */
+    @ConfigMapping
+    public interface AppConfig {
+        Providers providers();
+        Optional<Ai> ai();
+
+        interface Providers {
+            Optional<Github> github();
+            Optional<Jira> jira();
+            Optional<Zulip> zulip();
+        }
+
+        interface Github {
+            boolean enabled();
+            List<GithubInstance> instances();
+
+            interface GithubInstance {
+                String name();
+                Optional<String> url();
+                Optional<String> username();
+                String token();
+            }
+        }
+
+        interface Jira {
+            boolean enabled();
+            List<JiraInstance> instances();
+
+            interface JiraInstance {
+                String name();
+                String url();
+                String email();
+                String token();
+            }
+        }
+
+        interface Zulip {
+            boolean enabled();
+            List<ZulipInstance> instances();
+
+            interface ZulipInstance {
+                String url();
+                String email();
+                @io.smallrye.config.WithName("api_key")
+                String apiKey();
+            }
+        }
+
+        interface Ai {
+            Optional<String> url();
+            Optional<String> model();
+        }
+    }
+
+    /**
+     * Helper to load configuration from external YAML file
+     */
+    public static AppConfig loadConfig(String configPath) throws IOException {
+        var path = Paths.get(configPath);
+
+        if (!Files.exists(path)) {
+            throw new IOException("Configuration file not found: " + configPath +
+                "\nPlease create a configuration file. See config.yaml.example for reference.");
+        }
+
+        try {
+            // Create YAML config source from file
+            var yamlSource = new YamlConfigSource(path.toUri().toURL());
+
+            // Build SmallRye config with the YAML source and environment variables support
+            var config = new SmallRyeConfigBuilder()
+                .withSources(yamlSource)
+                .withDefaultValue("ai.url", "http://localhost:8000/v1")
+                .withDefaultValue("ai.model", "auto")
+                .build();
+
+            // Map to AppConfig interface
+            var appConfig = config.getConfigMapping(AppConfig.class);
+
+            // Validate configuration
+            validateConfig(appConfig);
+
+            return appConfig;
+        } catch (Exception e) {
+            throw new IOException("Failed to load configuration: " + e.getMessage(), e);
+        }
+    }
+
+    private static void validateConfig(AppConfig config) throws IOException {
+        if (config.providers() == null) {
+            throw new IOException("No providers configured");
+        }
+
+        // Check if at least one provider is enabled
+        boolean hasEnabledProvider = false;
+
+        if (config.providers().github().isPresent() && config.providers().github().get().enabled()) {
+            hasEnabledProvider = true;
+            if (config.providers().github().get().instances() == null ||
+                config.providers().github().get().instances().isEmpty()) {
+                throw new IOException("GitHub is enabled but no instances are configured");
+            }
+        }
+
+        if (config.providers().jira().isPresent() && config.providers().jira().get().enabled()) {
+            hasEnabledProvider = true;
+            if (config.providers().jira().get().instances() == null ||
+                config.providers().jira().get().instances().isEmpty()) {
+                throw new IOException("JIRA is enabled but no instances are configured");
+            }
+        }
+
+        if (config.providers().zulip().isPresent() && config.providers().zulip().get().enabled()) {
+            hasEnabledProvider = true;
+            if (config.providers().zulip().get().instances() == null ||
+                config.providers().zulip().get().instances().isEmpty()) {
+                throw new IOException("Zulip is enabled but no instances are configured");
+            }
+        }
+
+        if (!hasEnabledProvider) {
+            throw new IOException("No providers are enabled. Please enable at least one provider in the configuration.");
+        }
     }
 
     // ============================================================================
@@ -90,217 +222,6 @@ public class ActivityReport implements QuarkusApplication {
         boolean isConfigured();
     }
 
-    // ============================================================================
-    // CONFIGURATION MODELS
-    // ============================================================================
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Config {
-        @JsonProperty("providers")
-        private Providers providers;
-
-        @JsonProperty("ai")
-        private AIConfig ai;
-
-        public Providers getProviders() { return providers; }
-        public void setProviders(Providers providers) { this.providers = providers; }
-
-        public AIConfig getAi() { return ai; }
-        public void setAi(AIConfig ai) { this.ai = ai; }
-
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        public static class Providers {
-            @JsonProperty("github")
-            private GitHubConfig github;
-
-            @JsonProperty("jira")
-            private JiraConfig jira;
-
-            @JsonProperty("zulip")
-            private ZulipConfig zulip;
-
-            public GitHubConfig getGithub() { return github; }
-            public void setGithub(GitHubConfig github) { this.github = github; }
-
-            public JiraConfig getJira() { return jira; }
-            public void setJira(JiraConfig jira) { this.jira = jira; }
-
-            public ZulipConfig getZulip() { return zulip; }
-            public void setZulip(ZulipConfig zulip) { this.zulip = zulip; }
-        }
-
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        public static class GitHubConfig {
-            @JsonProperty("enabled")
-            private boolean enabled;
-
-            @JsonProperty("instances")
-            private List<GitHubInstance> instances;
-
-            public boolean isEnabled() { return enabled; }
-            public void setEnabled(boolean enabled) { this.enabled = enabled; }
-
-            public List<GitHubInstance> getInstances() { return instances; }
-            public void setInstances(List<GitHubInstance> instances) { this.instances = instances; }
-        }
-
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        public record GitHubInstance(
-            @JsonProperty("name") String name,
-            @JsonProperty("url") String url,
-            @JsonProperty("username") String username,
-            @JsonProperty("token") String token
-        ) {}
-
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        public static class JiraConfig {
-            @JsonProperty("enabled")
-            private boolean enabled;
-
-            @JsonProperty("instances")
-            private List<JiraInstance> instances;
-
-            public boolean isEnabled() { return enabled; }
-            public void setEnabled(boolean enabled) { this.enabled = enabled; }
-
-            public List<JiraInstance> getInstances() { return instances; }
-            public void setInstances(List<JiraInstance> instances) { this.instances = instances; }
-        }
-
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        public record JiraInstance(
-            @JsonProperty("name") String name,
-            @JsonProperty("url") String url,
-            @JsonProperty("email") String email,
-            @JsonProperty("token") String token
-        ) {}
-
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        public static class ZulipConfig {
-            @JsonProperty("enabled")
-            private boolean enabled;
-
-            @JsonProperty("instances")
-            private List<ZulipInstance> instances;
-
-            public boolean isEnabled() { return enabled; }
-            public void setEnabled(boolean enabled) { this.enabled = enabled; }
-
-            public List<ZulipInstance> getInstances() { return instances; }
-            public void setInstances(List<ZulipInstance> instances) { this.instances = instances; }
-        }
-
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        public record ZulipInstance(
-            @JsonProperty("url") String url,
-            @JsonProperty("email") String email,
-            @JsonProperty("api_key") String apiKey
-        ) {}
-
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        public record AIConfig(
-            @JsonProperty("url") String url,
-            @JsonProperty("model") String model
-        ) {}
-    }
-
-    // ============================================================================
-    // CONFIGURATION LOADER
-    // ============================================================================
-
-    @ApplicationScoped
-    public static class ConfigLoader {
-        private static final String DEFAULT_CONFIG_PATH = System.getProperty("user.home") + "/.activity-report/config.yaml";
-
-        public Config loadConfig() throws IOException {
-            return loadConfig(DEFAULT_CONFIG_PATH);
-        }
-
-        public Config loadConfig(String configPath) throws IOException {
-            java.nio.file.Path path = Paths.get(configPath);
-
-            if (!Files.exists(path)) {
-                throw new IOException("Configuration file not found: " + configPath +
-                    "\nPlease create a configuration file. See config.yaml.example for reference.");
-            }
-
-            String content = Files.readString(path);
-
-            // Expand environment variables
-            content = expandEnvironmentVariables(content);
-
-            ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
-            mapper.registerModule(new JavaTimeModule());
-
-            Config config = mapper.readValue(content, Config.class);
-
-            // Validate configuration
-            validateConfig(config);
-
-            return config;
-        }
-
-        private String expandEnvironmentVariables(String content) {
-            // Replace ${ENV_VAR} with actual environment variable values
-            var pattern = java.util.regex.Pattern.compile("\\$\\{([^}]+)\\}");
-            var matcher = pattern.matcher(content);
-
-            var result = new StringBuffer();
-            while (matcher.find()) {
-                String envVar = matcher.group(1);
-                String value = System.getenv(envVar);
-                if (value == null) {
-                    System.err.println("Warning: Environment variable not set: " + envVar);
-                    value = "";
-                }
-                matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(value));
-            }
-            matcher.appendTail(result);
-
-            return result.toString();
-        }
-
-        private void validateConfig(Config config) throws IOException {
-            if (config == null) {
-                throw new IOException("Configuration is empty");
-            }
-
-            if (config.getProviders() == null) {
-                throw new IOException("No providers configured");
-            }
-
-            // Check if at least one provider is enabled
-            boolean hasEnabledProvider = false;
-
-            if (config.getProviders().getGithub() != null && config.getProviders().getGithub().isEnabled()) {
-                hasEnabledProvider = true;
-                if (config.getProviders().getGithub().getInstances() == null ||
-                    config.getProviders().getGithub().getInstances().isEmpty()) {
-                    throw new IOException("GitHub is enabled but no instances are configured");
-                }
-            }
-
-            if (config.getProviders().getJira() != null && config.getProviders().getJira().isEnabled()) {
-                hasEnabledProvider = true;
-                if (config.getProviders().getJira().getInstances() == null ||
-                    config.getProviders().getJira().getInstances().isEmpty()) {
-                    throw new IOException("JIRA is enabled but no instances are configured");
-                }
-            }
-
-            if (config.getProviders().getZulip() != null && config.getProviders().getZulip().isEnabled()) {
-                hasEnabledProvider = true;
-                if (config.getProviders().getZulip().getInstances() == null ||
-                    config.getProviders().getZulip().getInstances().isEmpty()) {
-                    throw new IOException("Zulip is enabled but no instances are configured");
-                }
-            }
-
-            if (!hasEnabledProvider) {
-                throw new IOException("No providers are enabled. Please enable at least one provider in the configuration.");
-            }
-        }
-    }
 
     // ============================================================================
     // PROVIDER IMPLEMENTATIONS
@@ -313,36 +234,35 @@ public class ActivityReport implements QuarkusApplication {
         private final List<GitHub> githubClients;
         private final List<String> instanceNames;
 
-        public GitHubProvider(Config config) {
+        public GitHubProvider(AppConfig config) {
             this.githubClients = new ArrayList<>();
             this.instanceNames = new ArrayList<>();
 
-            if (config.getProviders().getGithub() != null &&
-                config.getProviders().getGithub().isEnabled() &&
-                config.getProviders().getGithub().getInstances() != null) {
-
-                for (Config.GitHubInstance instance : config.getProviders().getGithub().getInstances()) {
-                    try {
-                        GitHub client;
-                        if (instance.url() != null && !instance.url().equals("https://api.github.com")) {
-                            // GitHub Enterprise
-                            client = new GitHubBuilder()
-                                .withEndpoint(instance.url())
-                                .withOAuthToken(instance.token())
-                                .build();
-                        } else {
-                            // GitHub.com
-                            client = new GitHubBuilder()
-                                .withOAuthToken(instance.token())
-                                .build();
+            config.providers().github().ifPresent(github -> {
+                if (github.enabled() && github.instances() != null) {
+                    for (var instance : github.instances()) {
+                        try {
+                            GitHub client;
+                            if (instance.url().isPresent() && !instance.url().get().equals("https://api.github.com")) {
+                                // GitHub Enterprise
+                                client = new GitHubBuilder()
+                                    .withEndpoint(instance.url().get())
+                                    .withOAuthToken(instance.token())
+                                    .build();
+                            } else {
+                                // GitHub.com
+                                client = new GitHubBuilder()
+                                    .withOAuthToken(instance.token())
+                                    .build();
+                            }
+                            githubClients.add(client);
+                            instanceNames.add(instance.name());
+                        } catch (IOException e) {
+                            System.err.println("Warning: Failed to initialize GitHub instance " + instance.name() + ": " + e.getMessage());
                         }
-                        githubClients.add(client);
-                        instanceNames.add(instance.name());
-                    } catch (IOException e) {
-                        System.err.println("Warning: Failed to initialize GitHub instance " + instance.name() + ": " + e.getMessage());
                     }
                 }
-            }
+            });
         }
 
         @Override
@@ -552,22 +472,21 @@ public class ActivityReport implements QuarkusApplication {
 
         private record JiraInstance(String name, String url, String email, String token) {}
 
-        public JiraProvider(Config config) {
+        public JiraProvider(AppConfig config) {
             this.instances = new ArrayList<>();
 
-            if (config.getProviders().getJira() != null &&
-                config.getProviders().getJira().isEnabled() &&
-                config.getProviders().getJira().getInstances() != null) {
-
-                for (Config.JiraInstance instance : config.getProviders().getJira().getInstances()) {
-                    instances.add(new JiraInstance(
-                        instance.name(),
-                        instance.url(),
-                        instance.email(),
-                        instance.token()
-                    ));
+            config.providers().jira().ifPresent(jira -> {
+                if (jira.enabled() && jira.instances() != null) {
+                    for (var instance : jira.instances()) {
+                        instances.add(new JiraInstance(
+                            instance.name(),
+                            instance.url(),
+                            instance.email(),
+                            instance.token()
+                        ));
+                    }
                 }
-            }
+            });
         }
 
         @Override
@@ -679,21 +598,20 @@ public class ActivityReport implements QuarkusApplication {
 
         private record ZulipInstance(String url, String email, String apiKey) {}
 
-        public ZulipProvider(Config config) {
+        public ZulipProvider(AppConfig config) {
             this.instances = new ArrayList<>();
 
-            if (config.getProviders().getZulip() != null &&
-                config.getProviders().getZulip().isEnabled() &&
-                config.getProviders().getZulip().getInstances() != null) {
-
-                for (Config.ZulipInstance instance : config.getProviders().getZulip().getInstances()) {
-                    instances.add(new ZulipInstance(
-                        instance.url(),
-                        instance.email(),
-                        instance.apiKey()
-                    ));
+            config.providers().zulip().ifPresent(zulip -> {
+                if (zulip.enabled() && zulip.instances() != null) {
+                    for (var instance : zulip.instances()) {
+                        instances.add(new ZulipInstance(
+                            instance.url(),
+                            instance.email(),
+                            instance.apiKey()
+                        ));
+                    }
                 }
-            }
+            });
         }
 
         @Override
@@ -914,15 +832,18 @@ public class ActivityReport implements QuarkusApplication {
         private final String modelName;
         private final ObjectMapper mapper;
 
-        public AIProcessor(Config config) {
-            this.aiUrl = config.getAi() != null && config.getAi().url() != null ?
-                config.getAi().url() : "http://localhost:8000/v1";
+        public AIProcessor(AppConfig config) {
+            this.aiUrl = config.ai()
+                .flatMap(ai -> ai.url())
+                .orElse("http://localhost:8000/v1");
             this.mapper = new ObjectMapper();
             this.mapper.registerModule(new JavaTimeModule());
 
             // Auto-detect model if not specified
-            String configuredModel = config.getAi() != null ? config.getAi().model() : null;
-            if (configuredModel == null || configuredModel.equals("auto")) {
+            var configuredModel = config.ai()
+                .flatMap(ai -> ai.model())
+                .orElse("auto");
+            if (configuredModel.equals("auto")) {
                 this.modelName = detectModel();
             } else {
                 this.modelName = configuredModel;
@@ -1123,16 +1044,15 @@ public class ActivityReport implements QuarkusApplication {
 
         @Override
         public void run() {
-            ConfigLoader configLoader = new ConfigLoader();
             try {
                 System.err.println("Activity Report Generator");
                 System.err.println("=========================\n");
 
                 // Load configuration
                 System.err.println("Loading configuration...");
-                Config config = configPath != null ?
-                    configLoader.loadConfig(configPath) :
-                    configLoader.loadConfig();
+                String effectiveConfigPath = configPath != null ? configPath :
+                    System.getProperty("user.home") + "/.activity-report/config.yaml";
+                var config = loadConfig(effectiveConfigPath);
                 System.err.println("Configuration loaded successfully.\n");
 
                 // Determine date range
@@ -1152,22 +1072,22 @@ public class ActivityReport implements QuarkusApplication {
                 // Initialize providers
                 List<ActivityProvider> providers = new ArrayList<>();
 
-                if (config.getProviders().getGithub() != null && config.getProviders().getGithub().isEnabled()) {
-                    GitHubProvider githubProvider = new GitHubProvider(config);
+                if (config.providers().github().map(g -> g.enabled()).orElse(false)) {
+                    var githubProvider = new GitHubProvider(config);
                     if (githubProvider.isConfigured()) {
                         providers.add(githubProvider);
                     }
                 }
 
-                if (config.getProviders().getJira() != null && config.getProviders().getJira().isEnabled()) {
-                    JiraProvider jiraProvider = new JiraProvider(config);
+                if (config.providers().jira().map(j -> j.enabled()).orElse(false)) {
+                    var jiraProvider = new JiraProvider(config);
                     if (jiraProvider.isConfigured()) {
                         providers.add(jiraProvider);
                     }
                 }
 
-                if (config.getProviders().getZulip() != null && config.getProviders().getZulip().isEnabled()) {
-                    ZulipProvider zulipProvider = new ZulipProvider(config);
+                if (config.providers().zulip().map(z -> z.enabled()).orElse(false)) {
+                    var zulipProvider = new ZulipProvider(config);
                     if (zulipProvider.isConfigured()) {
                         providers.add(zulipProvider);
                     }
