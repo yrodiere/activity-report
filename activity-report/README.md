@@ -68,18 +68,64 @@ The tool follows the XDG Base Directory Specification for configuration files. C
 
 **Note:** The configuration file location cannot be customized via command-line options. Use the `XDG_CONFIG_HOME` environment variable if you need a non-standard location.
 
-4. **Set up API tokens**:
+4. **Set up API tokens** - See "Credential Management" section below.
 
-   It's recommended to use environment variables for sensitive tokens:
+## Credential Management
 
+**RECOMMENDED: Use 1Password for Secure Secret Storage**
+
+The application can automatically load API tokens from a 1Password environment, providing secure credential storage without exposing tokens in config files or environment variables.
+
+### Setup with 1Password
+
+1. **Install 1Password CLI**:
    ```bash
-   # Add to ~/.bashrc or ~/.zshrc
-   export GITHUB_TOKEN="ghp_xxxxxxxxxxxxx"
-   export JIRA_TOKEN="xxxxxxxxxxxxx"
-   export ZULIP_API_KEY="xxxxxxxxxxxxx"
+   # See: https://developer.1password.com/docs/cli/get-started/
    ```
 
-   See `config.yaml.example` for detailed instructions on obtaining tokens for each service.
+2. **Sign in to 1Password**:
+   ```bash
+   op signin
+   ```
+
+3. **Create a 1Password Environment**:
+   - Go to 1Password web app
+   - Create environment variables for your API tokens:
+     - `GITHUB_TOKEN`
+     - `JIRA_TOKEN`
+     - `ZULIP_API_KEY`
+   - Point them to the corresponding items in your vault
+   - Learn more: https://developer.1password.com/docs/cli/secrets-environment-variables/
+
+4. **Configure the application**:
+
+   Add to your `~/.config/activity-report/config.yaml`:
+   ```yaml
+   onepassword:
+     environment: "your-environment-id"
+   ```
+
+5. **Run the application**:
+   ```bash
+   report
+   ```
+
+   The application will automatically call `op environment read` at startup and load all secrets. No wrapper scripts needed!
+
+### Alternative: Environment Variables (Without 1Password)
+
+If you don't use 1Password, you can use regular environment variables:
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+export GITHUB_TOKEN="ghp_xxxxxxxxxxxxx"
+export JIRA_TOKEN="xxxxxxxxxxxxx"
+export ZULIP_API_KEY="xxxxxxxxxxxxx"
+```
+
+### Creating API Tokens
+
+See `config.yaml.example` for detailed instructions on obtaining tokens for each service.
 
 ## Setting Up Podman AI Lab (Optional)
 
