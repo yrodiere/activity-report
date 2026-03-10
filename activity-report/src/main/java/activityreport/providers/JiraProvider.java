@@ -6,6 +6,7 @@ import activityreport.config.AppConfig;
 import activityreport.model.Activity;
 import activityreport.model.ActivityProvider;
 import com.fasterxml.jackson.databind.JsonNode;
+import io.quarkus.logging.Log;
 import org.eclipse.microprofile.rest.client.RestClientBuilder;
 
 import java.net.URI;
@@ -57,7 +58,7 @@ public class JiraProvider implements ActivityProvider {
             try {
                 allActivities.addAll(fetchFromInstance(instance, startDate, endDate));
             } catch (Exception e) {
-                System.err.println("Warning: Error fetching from JIRA instance " + instance.name + ": " + e.getMessage());
+                Log.warnf("Error fetching from JIRA instance %s: %s", instance.name, e.getMessage());
             }
         }
 

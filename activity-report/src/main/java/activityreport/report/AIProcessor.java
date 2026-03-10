@@ -5,6 +5,7 @@ import activityreport.config.AppConfig;
 import activityreport.model.Activity;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.quarkus.logging.Log;
 import org.eclipse.microprofile.rest.client.RestClientBuilder;
 
 import java.net.URI;
@@ -48,7 +49,7 @@ public class AIProcessor {
         }
 
         if (this.modelName != null) {
-            System.err.println("Using AI model: " + this.modelName);
+            Log.infof("Using AI model: %s", this.modelName);
         }
     }
 
@@ -58,18 +59,18 @@ public class AIProcessor {
             var data = root.get("data");
             if (data != null && data.isArray() && !data.isEmpty()) {
                 var model = data.get(0).get("id").asText();
-                System.err.println("Auto-detected AI model: " + model);
+                Log.infof("Auto-detected AI model: %s", model);
                 return model;
             }
         } catch (Exception e) {
-            System.err.println("Warning: Could not auto-detect AI model: " + e.getMessage());
+            Log.warnf("Could not auto-detect AI model: %s", e.getMessage());
         }
         return null;
     }
 
     public String generateGroupedReport(List<Activity> activities, Instant startDate, Instant endDate) {
         if (modelName == null) {
-            System.err.println("AI model not available, falling back to simple markdown");
+            Log.info("AI model not available, falling back to simple markdown");
             return MarkdownReportGenerator.generateSimple(activities, startDate, endDate);
         }
 
@@ -115,8 +116,8 @@ public class AIProcessor {
             return callAIModel(prompt);
 
         } catch (Exception e) {
-            System.err.println("Warning: AI processing failed: " + e.getMessage());
-            System.err.println("Falling back to simple markdown generation");
+            Log.warnf("AI processing failed: %s", e.getMessage());
+            Log.info("Falling back to simple markdown generation");
             return MarkdownReportGenerator.generateSimple(activities, startDate, endDate);
         }
     }

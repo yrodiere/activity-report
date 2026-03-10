@@ -1,5 +1,6 @@
 package activityreport.config;
 
+import io.quarkus.logging.Log;
 import io.smallrye.config.ConfigSourceContext;
 import io.smallrye.config.ConfigSourceFactory;
 import io.smallrye.config.SmallRyeConfigBuilder;
@@ -31,7 +32,7 @@ public class XdgYamlConfigSourceFactory implements ConfigSourceFactory {
                 return Collections.singletonList(yamlSource);
             } catch (IOException e) {
                 // Don't fail during build - the application will validate at runtime
-                System.err.println("Warning: Failed to load configuration from " + configPath + ": " + e.getMessage());
+                Log.warnf("Failed to load configuration from %s: %s", configPath, e.getMessage());
             }
         }
         // Return empty list to allow build to succeed - runtime validation will catch missing config

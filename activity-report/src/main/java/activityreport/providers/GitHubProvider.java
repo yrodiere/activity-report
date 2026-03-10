@@ -3,6 +3,7 @@ package activityreport.providers;
 import activityreport.config.AppConfig;
 import activityreport.model.Activity;
 import activityreport.model.ActivityProvider;
+import io.quarkus.logging.Log;
 import org.kohsuke.github.*;
 
 import java.io.IOException;
@@ -47,7 +48,7 @@ public class GitHubProvider implements ActivityProvider {
                         githubClients.add(client);
                         instanceNames.add(instance.name());
                     } catch (IOException e) {
-                        System.err.println("Warning: Failed to initialize GitHub instance " + instance.name() + ": " + e.getMessage());
+                        Log.warnf("Failed to initialize GitHub instance %s: %s", instance.name(), e.getMessage());
                     }
                 }
             }
@@ -97,7 +98,7 @@ public class GitHubProvider implements ActivityProvider {
                     }
                 }
             } catch (Exception e) {
-                System.err.println("Warning: Error fetching from " + instanceName + ": " + e.getMessage());
+                Log.warnf("Error fetching from %s: %s", instanceName, e.getMessage());
             }
         }
 

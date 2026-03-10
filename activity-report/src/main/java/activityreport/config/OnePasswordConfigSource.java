@@ -1,5 +1,6 @@
 package activityreport.config;
 
+import io.quarkus.logging.Log;
 import io.smallrye.config.ConfigSourceContext;
 import io.smallrye.config.ConfigSourceFactory;
 import io.smallrye.config.ConfigValue;
@@ -82,8 +83,8 @@ public class OnePasswordConfigSource implements ConfigSourceFactory {
         Map<String, String> properties = new HashMap<>();
 
         if (!isOpCliAvailable()) {
-            System.err.println("1Password environment configured (" + envId + ") but 'op' CLI not found");
-            System.err.println("Install from: https://developer.1password.com/docs/cli/get-started/");
+            Log.errorf("1Password environment configured (%s) but 'op' CLI not found", envId);
+            Log.error("Install from: https://developer.1password.com/docs/cli/get-started/");
             return properties;
         }
 
@@ -110,23 +111,23 @@ public class OnePasswordConfigSource implements ConfigSourceFactory {
             boolean completed = process.waitFor(10, TimeUnit.SECONDS);
             if (!completed) {
                 process.destroyForcibly();
-                System.err.println("1Password CLI timed out reading environment: " + envId);
+                Log.errorf("1Password CLI timed out reading environment: %s", envId);
                 return properties;
             }
 
             if (process.exitValue() != 0) {
-                System.err.println("Failed to read 1Password environment: " + envId);
-                System.err.println("Make sure you're signed in with: op signin");
+                Log.errorf("Failed to read 1Password environment: %s", envId);
+                Log.error("Make sure you're signed in with: op signin");
                 return properties;
             }
 
             if (!properties.isEmpty()) {
-                System.err.println("Loaded " + properties.size() +
-                                 " secrets from 1Password environment: " + envId);
+                Log.infof("Loaded %d secrets from 1Password environment: %s",
+                         properties.size(), envId);
             }
 
         } catch (Exception e) {
-            System.err.println("Error loading 1Password environment: " + e.getMessage());
+            Log.errorf("Error loading 1Password environment: %s", e.getMessage());
         }
 
         return properties;

@@ -8,6 +8,7 @@ import activityreport.providers.JiraProvider;
 import activityreport.providers.ZulipProvider;
 import activityreport.report.AIProcessor;
 import activityreport.report.MarkdownReportGenerator;
+import io.quarkus.logging.Log;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.ConfigProvider;
 import picocli.CommandLine.Command;
@@ -63,12 +64,12 @@ public class ActivityReportCommand implements Runnable {
     @Override
     public void run() {
         try {
-            System.err.println("Activity Report Generator");
-            System.err.println("=========================\n");
+            Log.info("Activity Report Generator");
+            Log.info("=========================\n");
 
             // Validate configuration
             validateConfig();
-            System.err.println("Configuration loaded successfully.\n");
+            Log.info("Configuration loaded successfully.\n");
 
             // Determine date range
             Instant startDate, endDate;
@@ -81,8 +82,8 @@ public class ActivityReportCommand implements Runnable {
             }
 
             DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneId.systemDefault());
-            System.err.println("Fetching activities from " + formatter.format(startDate) +
-                             " to " + formatter.format(endDate) + "\n");
+            Log.infof("Fetching activities from %s to %s\n",
+                     formatter.format(startDate), formatter.format(endDate));
 
             // Initialize providers
             List<ActivityProvider> providers = new ArrayList<>();
@@ -109,7 +110,7 @@ public class ActivityReportCommand implements Runnable {
             }
 
             if (providers.isEmpty()) {
-                System.err.println("Error: No providers are configured and enabled.");
+                Log.error("No providers are configured and enabled.");
                 System.exit(1);
                 return;
             }
@@ -119,19 +120,18 @@ public class ActivityReportCommand implements Runnable {
             List<String> errors = new ArrayList<>();
 
             for (ActivityProvider provider : providers) {
-                System.err.println("Fetching from " + provider.getName() + "...");
+                Log.infof("Fetching from %s...", provider.getName());
                 try {
                     List<Activity> activities = provider.fetchActivities(startDate, endDate);
                     allActivities.addAll(activities);
-                    System.err.println("  Found " + activities.size() + " activities");
+                    Log.infof("  Found %d activities", activities.size());
                 } catch (Exception e) {
-                    String errorMsg = "  Error: " + e.getMessage();
-                    System.err.println(errorMsg);
+                    Log.errorf("  %s", e.getMessage());
                     errors.add(provider.getName() + ": " + e.getMessage());
                 }
             }
 
-            System.err.println("\nTotal activities found: " + allActivities.size());
+            Log.infof("\nTotal activities found: %d", allActivities.size());
 
             if (allActivities.isEmpty()) {
                 System.out.println("# Activity Report\n");
@@ -146,7 +146,7 @@ public class ActivityReportCommand implements Runnable {
             }
 
             // Generate report
-            System.err.println("Generating report...\n");
+            Log.info("Generating report...\n");
 
             String report;
             if (noAi) {
@@ -161,15 +161,15 @@ public class ActivityReportCommand implements Runnable {
 
             // Report any errors at the end
             if (!errors.isEmpty()) {
-                System.err.println("\nWarning: Some providers encountered errors:");
+                Log.warn("\nSome providers encountered errors:");
                 for (String error : errors) {
-                    System.err.println("  - " + error);
+                    Log.warnf("  - %s", error);
                 }
             }
 
         } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
-            e.printStackTrace(System.err);
+            Log.errorf("%s", e.getMessage());
+            Log.error("", e);
             System.exit(1);
         }
     }
