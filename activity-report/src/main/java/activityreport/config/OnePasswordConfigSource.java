@@ -93,9 +93,9 @@ public class OnePasswordConfigSource implements ConfigSourceFactory {
 
         try {
             ProcessBuilder pb = new ProcessBuilder("op", "environment", "read", envId);
-            pb.redirectErrorStream(true);
             Process process = pb.start();
 
+            // Read stdout (the actual environment data)
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
 
@@ -108,6 +108,16 @@ public class OnePasswordConfigSource implements ConfigSourceFactory {
                         String value = line.substring(equalsIndex + 1);
                         properties.put(key, value);
                     }
+                }
+            }
+
+            // Read stderr (messages from op CLI)
+            try (BufferedReader errReader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+
+                String errLine;
+                while ((errLine = errReader.readLine()) != null) {
+                    Log.infof("1Password CLI: %s", errLine);
                 }
             }
 
