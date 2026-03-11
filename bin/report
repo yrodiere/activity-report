@@ -16,5 +16,21 @@ if [ ! -d "$QUARKUS_APP" ] || [ "$PROJECT_DIR/pom.xml" -nt "$QUARKUS_APP/quarkus
     echo "" >&2
 fi
 
+# Parse --debug flag
+DEBUG_MODE=""
+APP_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --debug)
+            DEBUG_MODE="-Dquarkus.log.console.level=DEBUG"
+            shift
+            ;;
+        *)
+            APP_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
 # Run the Quarkus application
-exec java -jar "$QUARKUS_APP/quarkus-run.jar" "$@"
+exec java $DEBUG_MODE -jar "$QUARKUS_APP/quarkus-run.jar" "${APP_ARGS[@]}"

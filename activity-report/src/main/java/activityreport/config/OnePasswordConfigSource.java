@@ -54,7 +54,7 @@ public class OnePasswordConfigSource implements ConfigSourceFactory {
             return Collections.emptyList();
         }
 
-        Log.infof("Found %d 1Password reference(s) to resolve", referencesToResolve.size());
+        Log.debugf("Found %d 1Password reference(s) to resolve", referencesToResolve.size());
 
         // Resolve all references (this will authenticate once and reuse the session)
         for (Map.Entry<String, String> entry : referencesToResolve.entrySet()) {
@@ -71,7 +71,7 @@ public class OnePasswordConfigSource implements ConfigSourceFactory {
             return Collections.emptyList();
         }
 
-        Log.infof("Resolved %d secret(s) from 1Password", resolvedValues.size());
+        Log.debugf("Resolved %d secret(s) from 1Password", resolvedValues.size());
 
         // Return a ConfigSource with the resolved properties
         ConfigSource source = new ConfigSource() {
@@ -158,7 +158,7 @@ public class OnePasswordConfigSource implements ConfigSourceFactory {
 
             // Log stderr output even on success (might contain helpful info)
             if (errorOutput.length() > 0) {
-                Log.infof("1Password CLI: %s", errorOutput.toString());
+                Log.debugf("1Password CLI: %s", errorOutput.toString());
             }
 
             return value.toString();
