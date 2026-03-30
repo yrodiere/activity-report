@@ -1,6 +1,7 @@
 package activityreport.providers;
 
 import activityreport.config.AppConfig;
+import activityreport.model.ActionCategory;
 import activityreport.model.Activity;
 import activityreport.model.ActivityProvider;
 import io.quarkus.logging.Log;
@@ -113,8 +114,8 @@ public class GitHubProvider implements ActivityProvider {
 
                 // Step 2: Fetch full details for each unique issue/PR
                 int beforeCount = allActivities.size();
-                allActivities.addAll(fetchIssueDetails(github, instanceInfo, issueRefs, startDate, endDate));
-                allActivities.addAll(fetchPullRequestDetails(github, instanceInfo, prRefs, startDate, endDate));
+                allActivities.addAll(fetchIssueDetails(github, instanceInfo, currentUser, issueRefs, startDate, endDate));
+                allActivities.addAll(fetchPullRequestDetails(github, instanceInfo, currentUser, prRefs, startDate, endDate));
                 int foundCount = allActivities.size() - beforeCount;
 
                 Log.infof("Found %d activities from GitHub instance: %s", foundCount, instanceName);
@@ -168,7 +169,7 @@ public class GitHubProvider implements ActivityProvider {
         }
     }
 
-    private List<Activity> fetchIssueDetails(GitHub github, InstanceInfo instanceInfo, Set<IssueRef> issueRefs, Instant startDate, Instant endDate) {
+    private List<Activity> fetchIssueDetails(GitHub github, InstanceInfo instanceInfo, GHUser currentUser, Set<IssueRef> issueRefs, Instant startDate, Instant endDate) {
         List<Activity> activities = new ArrayList<>();
         String source = "GitHub - " + instanceInfo.name;
 
@@ -192,9 +193,11 @@ public class GitHubProvider implements ActivityProvider {
 
                 // Only create activity if there were interactions in the date range
                 if (!contentUrls.isEmpty() || (!updatedAt.isBefore(startDate) && !updatedAt.isAfter(endDate))) {
+                    // Issues are always DISCUSS
                     Activity activity = new Activity(
                         source,
                         "issue",
+                        ActionCategory.DISCUSS,
                         ref.repoFullName + " #" + ref.number + ": " + issue.getTitle(),
                         "", // description
                         issue.getHtmlUrl().toString(),
@@ -217,7 +220,7 @@ public class GitHubProvider implements ActivityProvider {
         return activities;
     }
 
-    private List<Activity> fetchPullRequestDetails(GitHub github, InstanceInfo instanceInfo, Set<IssueRef> prRefs, Instant startDate, Instant endDate) {
+    private List<Activity> fetchPullRequestDetails(GitHub github, InstanceInfo instanceInfo, GHUser currentUser, Set<IssueRef> prRefs, Instant startDate, Instant endDate) {
         List<Activity> activities = new ArrayList<>();
         String source = "GitHub - " + instanceInfo.name;
 
@@ -227,6 +230,16 @@ public class GitHubProvider implements ActivityProvider {
                 GHPullRequest pr = repo.getPullRequest(ref.number);
 
                 Instant updatedAt = pr.getUpdatedAt().toInstant();
+
+                // Determine action category based on PR authorship
+                ActionCategory actionCategory;
+                try {
+                    boolean isAuthor = pr.getUser().getLogin().equals(currentUser.getLogin());
+                    actionCategory = isAuthor ? ActionCategory.CODE : ActionCategory.REVIEW;
+                } catch (Exception e) {
+                    Log.tracef("Failed to determine PR author for %s#%d, defaulting to review: %s", ref.repoFullName, ref.number, e.getMessage());
+                    actionCategory = ActionCategory.REVIEW;
+                }
 
                 // Collect all relevant links within date range
                 List<String> contentUrls = new ArrayList<>();
@@ -260,6 +273,7 @@ public class GitHubProvider implements ActivityProvider {
                     Activity activity = new Activity(
                         source,
                         "pull_request",
+                        actionCategory,
                         ref.repoFullName + " #" + ref.number + ": " + pr.getTitle(),
                         "", // description
                         pr.getHtmlUrl().toString(),

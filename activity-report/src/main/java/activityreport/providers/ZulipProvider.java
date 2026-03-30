@@ -5,6 +5,7 @@ import activityreport.client.TraceClientLogger;
 import activityreport.client.ZulipRestClient;
 import org.jboss.resteasy.reactive.client.api.LoggingScope;
 import activityreport.config.AppConfig;
+import activityreport.model.ActionCategory;
 import activityreport.model.Activity;
 import activityreport.model.ActivityProvider;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -142,6 +143,7 @@ public class ZulipProvider implements ActivityProvider {
                 Activity activity = new Activity(
                     source,
                     "topic",
+                    ActionCategory.DISCUSS,  // Zulip activities are always discussions
                     topic.streamName + " / " + topic.subject,
                     "", // description
                     topicUrl,

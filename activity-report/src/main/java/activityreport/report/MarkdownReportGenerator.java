@@ -1,5 +1,6 @@
 package activityreport.report;
 
+import activityreport.model.ActionCategory;
 import activityreport.model.Activity;
 
 import java.time.Instant;
@@ -14,15 +15,18 @@ public class MarkdownReportGenerator {
     public static String generateSimple(List<Activity> activities, Instant startDate, Instant endDate) {
         StringBuilder report = new StringBuilder();
 
-        // Group by project
+        // Group by project and action category
         Map<String, List<Activity>> byProject = new LinkedHashMap<>();
         byProject.put("General", new ArrayList<>()); // Always empty, manually filled
 
         List<Activity> miscActivities = new ArrayList<>();
 
         for (Activity activity : activities) {
+            ActionCategory actionCategory = activity.actionCategory();
             String project = (String) activity.metadata().get("project");
-            if (project != null && !project.isEmpty()) {
+
+            // Only CODE activities go to projects, others go to Misc
+            if (actionCategory == ActionCategory.CODE && project != null && !project.isEmpty()) {
                 byProject.computeIfAbsent(project, k -> new ArrayList<>()).add(activity);
             } else {
                 miscActivities.add(activity);
@@ -55,10 +59,10 @@ public class MarkdownReportGenerator {
             report.append("----\n\n");
         }
 
-        // Generate Misc section
+        // Generate Misc section (reviews, discussions)
         if (!miscActivities.isEmpty()) {
             report.append("# Misc\n\n");
-            report.append("Discussions, triage\n\n");
+            report.append("Reviews, triage, discussions\n\n");
 
             for (Activity activity : miscActivities) {
                 formatActivity(report, activity);

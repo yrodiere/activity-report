@@ -5,6 +5,7 @@ import activityreport.client.JiraRestClient;
 import activityreport.client.TraceClientLogger;
 import org.jboss.resteasy.reactive.client.api.LoggingScope;
 import activityreport.config.AppConfig;
+import activityreport.model.ActionCategory;
 import activityreport.model.Activity;
 import activityreport.model.ActivityProvider;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -158,13 +159,19 @@ public class JiraProvider implements ActivityProvider {
                     }
 
                     // Extract pull request URLs from rendered description
+                    int prUrlsCount = contentUrls.size();
                     extractPullRequestUrls(issue, instance.url, key, contentUrls);
+                    boolean hasPrUrls = contentUrls.size() > prUrlsCount;
 
                     // Only create activity if user had activity during the time period
                     if (latestUserActivity != null) {
+                        // Determine action category: if there are PR URLs, it's code work, otherwise discuss
+                        ActionCategory actionCategory = hasPrUrls ? ActionCategory.CODE : ActionCategory.DISCUSS;
+
                         Activity activity = new Activity(
                             "JIRA - " + instance.name,
                             "issue",
+                            actionCategory,
                             key + ": " + summary,
                             "Type: " + issueType + ", Status: " + status,
                             issueUrl,

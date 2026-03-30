@@ -10,22 +10,23 @@ import java.util.Map;
  * Core activity data model representing a single activity from any provider
  */
 public record Activity(
-    String source,        // e.g., "GitHub.com", "JIRA - Hibernate"
-    String type,          // e.g., "commit", "issue", "pr", "message"
+    String source,                   // e.g., "GitHub.com", "JIRA - Hibernate"
+    String action,                   // e.g., "issue", "pull_request", "topic"
+    ActionCategory actionCategory,   // The category of action performed (CODE, REVIEW, DISCUSS)
     String title,
     String description,
     String url,
     Instant timestamp,
-    List<String> contentUrls,  // Additional URLs (comments, reviews, messages, etc.)
+    List<String> contentUrls,        // Additional URLs (comments, reviews, messages, etc.)
     Map<String, Object> metadata
 ) implements Comparable<Activity> {
 
-    public Activity(String source, String type, String title, String description, String url, Instant timestamp) {
-        this(source, type, title, description, url, timestamp, new ArrayList<>(), new HashMap<>());
+    public Activity(String source, String action, ActionCategory actionCategory, String title, String description, String url, Instant timestamp) {
+        this(source, action, actionCategory, title, description, url, timestamp, new ArrayList<>(), new HashMap<>());
     }
 
-    public Activity(String source, String type, String title, String description, String url, Instant timestamp, List<String> contentUrls) {
-        this(source, type, title, description, url, timestamp, contentUrls, new HashMap<>());
+    public Activity(String source, String action, ActionCategory actionCategory, String title, String description, String url, Instant timestamp, List<String> contentUrls) {
+        this(source, action, actionCategory, title, description, url, timestamp, contentUrls, new HashMap<>());
     }
 
     public void addMetadata(String key, Object value) {
@@ -43,6 +44,6 @@ public record Activity(
 
     @Override
     public String toString() {
-        return String.format("[%s] %s: %s", source, type, title);
+        return String.format("[%s] %s: %s", source, action, title);
     }
 }

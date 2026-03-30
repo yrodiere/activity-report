@@ -133,7 +133,7 @@ public class AIProcessor {
             .map(activity -> {
                 Map<String, Object> map = new LinkedHashMap<>();
                 map.put("source", activity.source());
-                map.put("type", activity.type());
+                map.put("action", activity.action());
                 map.put("title", activity.title());
                 if (activity.description() != null && !activity.description().isEmpty()) {
                     // Truncate very long descriptions
