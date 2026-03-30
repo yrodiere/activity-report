@@ -26,6 +26,7 @@ import jakarta.annotation.Priority;
 public class OnePasswordConfigSourceInterceptor implements ConfigSourceInterceptor {
 
     private static volatile Boolean opCliAvailable = null;
+    private static volatile boolean promptShown = false;
 
     @Override
     public ConfigValue getValue(ConfigSourceInterceptorContext context, String name) {
@@ -48,6 +49,9 @@ public class OnePasswordConfigSourceInterceptor implements ConfigSourceIntercept
             return configValue;
         }
 
+        // Show prompt before first 1Password access
+        showPromptIfNeeded();
+
         // Resolve the 1Password reference
         String resolvedValue = readFromOnePassword(value);
 
@@ -60,6 +64,19 @@ public class OnePasswordConfigSourceInterceptor implements ConfigSourceIntercept
 
         // Return a new ConfigValue with the resolved secret
         return configValue.withValue(resolvedValue);
+    }
+
+    private static void showPromptIfNeeded() {
+        if (!promptShown) {
+            synchronized (OnePasswordConfigSourceInterceptor.class) {
+                if (!promptShown) {
+                    System.err.println("Accessing 1Password to retrieve secrets...");
+                    System.err.println("You may be prompted to authenticate with 1Password CLI.");
+                    System.err.println();
+                    promptShown = true;
+                }
+            }
+        }
     }
 
     private static String readFromOnePassword(String reference) {
