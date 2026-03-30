@@ -273,6 +273,55 @@ If the AI model is not available:
 
 ## Advanced Configuration
 
+### Project Classification
+
+The tool can organize your report by projects, creating sections like "Project: Quarkus", "Project: Hibernate ORM", etc. Activities are classified based on URL pattern matching.
+
+Configure projects in your `config.yaml`:
+
+```yaml
+projects:
+  - name: "Quarkus"
+    urlPatterns:
+      - "https://github.com/quarkusio/*"
+      - "https://github.com/quarkiverse/*"
+  - name: "Hibernate ORM"
+    urlPatterns:
+      - "https://github.com/hibernate/hibernate-orm/*"
+      - "https://redhat.atlassian.net/browse/HHH-*"
+  - name: "Infrastructure"
+    urlPatterns:
+      - "https://github.com/hibernate/hibernate.org/*"
+```
+
+**Classification Logic:**
+1. The tool first tries to match the activity's main URL against the configured patterns
+2. If no match, it tries to match URLs in the activity's content (comments, reviews, messages)
+3. If still no match, it uses the instance's `defaultProject` (see below)
+4. If still no match, the activity goes to the "Misc" section
+
+**Default Projects for Instances:**
+
+You can assign a default project to provider instances. This is useful when an entire instance is dedicated to a specific project:
+
+```yaml
+providers:
+  github:
+    enabled: true
+    instances:
+      - name: "GitHub.com"
+        token: "${GITHUB_TOKEN}"
+        defaultProject: "Quarkus"  # Activities from this instance default to Quarkus
+
+  zulip:
+    enabled: true
+    instances:
+      - url: "https://quarkus.zulipchat.com"
+        email: "you@example.com"
+        api_key: "${ZULIP_API_KEY}"
+        defaultProject: "Quarkus"  # All Zulip messages default to Quarkus
+```
+
 ### Multiple GitHub Instances
 
 You can configure both GitHub.com and GitHub Enterprise:

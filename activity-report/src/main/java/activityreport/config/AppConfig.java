@@ -25,6 +25,8 @@ public interface AppConfig {
 
     Optional<@Valid Ai> ai();
 
+    Optional<List<@Valid Project>> projects();
+
     interface Providers {
         Optional<@Valid Github> github();
         Optional<@Valid Jira> jira();
@@ -46,6 +48,7 @@ public interface AppConfig {
             Optional<@URL String> url();
             Optional<String> username();
             Optional<String> token();
+            Optional<String> defaultProject();
         }
     }
 
@@ -59,6 +62,7 @@ public interface AppConfig {
             @NotBlank @URL(protocol = "https") String url();
             @NotBlank @Email String email();
             @NotBlank String token();
+            Optional<String> defaultProject();
         }
     }
 
@@ -71,11 +75,17 @@ public interface AppConfig {
             @NotBlank @URL(protocol = "https") String url();
             @NotBlank @Email String email();
             @NotBlank @io.smallrye.config.WithName("api_key") String apiKey();
+            Optional<String> defaultProject();
         }
     }
 
     interface Ai {
         Optional<@URL String> url();
         Optional<String> model();
+    }
+
+    interface Project {
+        @NotBlank String name();
+        Optional<List<String>> urlPatterns();
     }
 }

@@ -8,6 +8,7 @@ import activityreport.providers.JiraProvider;
 import activityreport.providers.ZulipProvider;
 import activityreport.report.AIProcessor;
 import activityreport.report.MarkdownReportGenerator;
+import activityreport.report.ProjectClassifier;
 import io.quarkus.logging.Log;
 import io.quarkus.picocli.runtime.annotations.TopCommand;
 import jakarta.inject.Inject;
@@ -145,6 +146,15 @@ public class ActivityReportCommand implements Runnable {
                     }
                 }
                 return;
+            }
+
+            // Classify activities into projects
+            Log.info("Classifying activities into projects...\n");
+            ProjectClassifier classifier = new ProjectClassifier(config);
+            for (Activity activity : allActivities) {
+                classifier.classifyActivity(activity).ifPresent(project ->
+                    activity.addMetadata("project", project)
+                );
             }
 
             // Generate report

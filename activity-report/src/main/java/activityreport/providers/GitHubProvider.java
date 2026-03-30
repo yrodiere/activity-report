@@ -18,11 +18,13 @@ import java.util.stream.Collectors;
  */
 public class GitHubProvider implements ActivityProvider {
     private final List<GitHub> githubClients;
-    private final List<String> instanceNames;
+    private final List<InstanceInfo> instanceInfos;
+
+    private record InstanceInfo(String name, String defaultProject) {}
 
     public GitHubProvider(AppConfig config) {
         this.githubClients = new ArrayList<>();
-        this.instanceNames = new ArrayList<>();
+        this.instanceInfos = new ArrayList<>();
 
         config.providers().github().ifPresent(github -> {
             if (github.enabled() && github.instances() != null) {
@@ -46,7 +48,10 @@ public class GitHubProvider implements ActivityProvider {
 
                         client = builder.build();
                         githubClients.add(client);
-                        instanceNames.add(instance.name());
+                        instanceInfos.add(new InstanceInfo(
+                            instance.name(),
+                            instance.defaultProject().orElse(null)
+                        ));
                     } catch (IOException e) {
                         Log.warnf("Failed to initialize GitHub instance %s: %s", instance.name(), e.getMessage());
                     }
@@ -71,7 +76,8 @@ public class GitHubProvider implements ActivityProvider {
 
         for (int i = 0; i < githubClients.size(); i++) {
             GitHub github = githubClients.get(i);
-            String instanceName = instanceNames.get(i);
+            InstanceInfo instanceInfo = instanceInfos.get(i);
+            String instanceName = instanceInfo.name;
 
             try {
                 GHUser currentUser = github.getMyself();
@@ -104,8 +110,8 @@ public class GitHubProvider implements ActivityProvider {
                 }
 
                 // Step 2: Fetch full details for each unique issue/PR
-                allActivities.addAll(fetchIssueDetails(github, instanceName, issueRefs, startDate, endDate));
-                allActivities.addAll(fetchPullRequestDetails(github, instanceName, prRefs, startDate, endDate));
+                allActivities.addAll(fetchIssueDetails(github, instanceInfo, issueRefs, startDate, endDate));
+                allActivities.addAll(fetchPullRequestDetails(github, instanceInfo, prRefs, startDate, endDate));
 
             } catch (Exception e) {
                 Log.warnf("Error fetching from %s: %s", instanceName, e.getMessage());
@@ -156,9 +162,9 @@ public class GitHubProvider implements ActivityProvider {
         }
     }
 
-    private List<Activity> fetchIssueDetails(GitHub github, String instanceName, Set<IssueRef> issueRefs, Instant startDate, Instant endDate) {
+    private List<Activity> fetchIssueDetails(GitHub github, InstanceInfo instanceInfo, Set<IssueRef> issueRefs, Instant startDate, Instant endDate) {
         List<Activity> activities = new ArrayList<>();
-        String source = "GitHub - " + instanceName;
+        String source = "GitHub - " + instanceInfo.name;
 
         for (IssueRef ref : issueRefs) {
             try {
@@ -168,29 +174,32 @@ public class GitHubProvider implements ActivityProvider {
                 Instant updatedAt = issue.getUpdatedAt().toInstant();
 
                 // Collect all relevant links within date range
-                List<String> links = new ArrayList<>();
-                links.add("Issue: " + issue.getHtmlUrl());
+                List<String> contentUrls = new ArrayList<>();
 
                 // Add comment links
                 for (GHIssueComment comment : issue.getComments()) {
                     Instant commentDate = comment.getCreatedAt().toInstant();
                     if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
-                        links.add("Comment: " + comment.getHtmlUrl());
+                        contentUrls.add(comment.getHtmlUrl().toString());
                     }
                 }
 
                 // Only create activity if there were interactions in the date range
-                if (links.size() > 1 || (!updatedAt.isBefore(startDate) && !updatedAt.isAfter(endDate))) {
-                    String description = String.join("\n", links);
-
+                if (!contentUrls.isEmpty() || (!updatedAt.isBefore(startDate) && !updatedAt.isAfter(endDate))) {
                     Activity activity = new Activity(
                         source,
                         "issue",
                         ref.repoFullName + " #" + ref.number + ": " + issue.getTitle(),
-                        description,
+                        "", // description
                         issue.getHtmlUrl().toString(),
-                        updatedAt
+                        updatedAt,
+                        contentUrls
                     );
+
+                    // Add default project if configured
+                    if (instanceInfo.defaultProject != null) {
+                        activity.addMetadata("defaultProject", instanceInfo.defaultProject);
+                    }
 
                     activities.add(activity);
                 }
@@ -202,9 +211,9 @@ public class GitHubProvider implements ActivityProvider {
         return activities;
     }
 
-    private List<Activity> fetchPullRequestDetails(GitHub github, String instanceName, Set<IssueRef> prRefs, Instant startDate, Instant endDate) {
+    private List<Activity> fetchPullRequestDetails(GitHub github, InstanceInfo instanceInfo, Set<IssueRef> prRefs, Instant startDate, Instant endDate) {
         List<Activity> activities = new ArrayList<>();
-        String source = "GitHub - " + instanceName;
+        String source = "GitHub - " + instanceInfo.name;
 
         for (IssueRef ref : prRefs) {
             try {
@@ -214,14 +223,13 @@ public class GitHubProvider implements ActivityProvider {
                 Instant updatedAt = pr.getUpdatedAt().toInstant();
 
                 // Collect all relevant links within date range
-                List<String> links = new ArrayList<>();
-                links.add("Pull Request: " + pr.getHtmlUrl());
+                List<String> contentUrls = new ArrayList<>();
 
                 // Add comment links
                 for (GHIssueComment comment : pr.getComments()) {
                     Instant commentDate = comment.getCreatedAt().toInstant();
                     if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
-                        links.add("Comment: " + comment.getHtmlUrl());
+                        contentUrls.add(comment.getHtmlUrl().toString());
                     }
                 }
 
@@ -229,7 +237,7 @@ public class GitHubProvider implements ActivityProvider {
                 for (GHPullRequestReview review : pr.listReviews()) {
                     Instant reviewDate = review.getSubmittedAt().toInstant();
                     if (!reviewDate.isBefore(startDate) && !reviewDate.isAfter(endDate)) {
-                        links.add("Review: " + review.getHtmlUrl());
+                        contentUrls.add(review.getHtmlUrl().toString());
                     }
                 }
 
@@ -237,22 +245,26 @@ public class GitHubProvider implements ActivityProvider {
                 for (GHPullRequestReviewComment reviewComment : pr.listReviewComments()) {
                     Instant commentDate = reviewComment.getCreatedAt().toInstant();
                     if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
-                        links.add("Review Comment: " + reviewComment.getHtmlUrl());
+                        contentUrls.add(reviewComment.getHtmlUrl().toString());
                     }
                 }
 
                 // Only create activity if there were interactions in the date range
-                if (links.size() > 1 || (!updatedAt.isBefore(startDate) && !updatedAt.isAfter(endDate))) {
-                    String description = String.join("\n", links);
-
+                if (!contentUrls.isEmpty() || (!updatedAt.isBefore(startDate) && !updatedAt.isAfter(endDate))) {
                     Activity activity = new Activity(
                         source,
                         "pull_request",
                         ref.repoFullName + " #" + ref.number + ": " + pr.getTitle(),
-                        description,
+                        "", // description
                         pr.getHtmlUrl().toString(),
-                        updatedAt
+                        updatedAt,
+                        contentUrls
                     );
+
+                    // Add default project if configured
+                    if (instanceInfo.defaultProject != null) {
+                        activity.addMetadata("defaultProject", instanceInfo.defaultProject);
+                    }
 
                     activities.add(activity);
                 }

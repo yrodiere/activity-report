@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 public class ZulipProvider implements ActivityProvider {
     private final List<ZulipInstance> instances;
 
-    private record ZulipInstance(String url, String email, String apiKey) {}
+    private record ZulipInstance(String url, String email, String apiKey, String defaultProject) {}
 
     public ZulipProvider(AppConfig config) {
         this.instances = new ArrayList<>();
@@ -33,7 +33,8 @@ public class ZulipProvider implements ActivityProvider {
                     instances.add(new ZulipInstance(
                         instance.url(),
                         instance.email(),
-                        instance.apiKey()
+                        instance.apiKey(),
+                        instance.defaultProject().orElse(null)
                     ));
                 }
             }
@@ -123,29 +124,29 @@ public class ZulipProvider implements ActivityProvider {
 
         for (TopicMessages topic : topicMap.values()) {
             try {
-                // Build links
-                List<String> links = new ArrayList<>();
-
-                // Topic link
-                String topicUrl = buildTopicUrl(instance.url, topic.streamName, topic.subject);
-                links.add("Topic: " + topicUrl);
-
-                // Message links
+                // Collect message URLs
+                List<String> contentUrls = new ArrayList<>();
                 for (int messageId : topic.messageIds) {
                     String messageUrl = buildMessageUrl(instance.url, topic.streamName, topic.subject, messageId);
-                    links.add("Message: " + messageUrl);
+                    contentUrls.add(messageUrl);
                 }
 
-                String description = String.join("\n", links);
+                String topicUrl = buildTopicUrl(instance.url, topic.streamName, topic.subject);
 
                 Activity activity = new Activity(
                     source,
                     "topic",
                     topic.streamName + " / " + topic.subject,
-                    description,
+                    "", // description
                     topicUrl,
-                    topic.latestTimestamp
+                    topic.latestTimestamp,
+                    contentUrls
                 );
+
+                // Add default project if configured
+                if (instance.defaultProject != null) {
+                    activity.addMetadata("defaultProject", instance.defaultProject);
+                }
 
                 activities.add(activity);
             } catch (Exception e) {

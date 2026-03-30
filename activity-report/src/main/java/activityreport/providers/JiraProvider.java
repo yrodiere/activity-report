@@ -23,7 +23,7 @@ import java.util.List;
 public class JiraProvider implements ActivityProvider {
     private final List<JiraInstance> instances;
 
-    private record JiraInstance(String name, String url, String email, String token) {}
+    private record JiraInstance(String name, String url, String email, String token, String defaultProject) {}
 
     public JiraProvider(AppConfig config) {
         this.instances = new ArrayList<>();
@@ -35,7 +35,8 @@ public class JiraProvider implements ActivityProvider {
                         instance.name(),
                         instance.url(),
                         instance.email(),
-                        instance.token()
+                        instance.token(),
+                        instance.defaultProject().orElse(null)
                     ));
                 }
             }
@@ -119,6 +120,12 @@ public class JiraProvider implements ActivityProvider {
 
                 activity.addMetadata("issueType", issueType);
                 activity.addMetadata("status", status);
+
+                // Add default project if configured
+                if (instance.defaultProject != null) {
+                    activity.addMetadata("defaultProject", instance.defaultProject);
+                }
+
                 activities.add(activity);
             }
         }

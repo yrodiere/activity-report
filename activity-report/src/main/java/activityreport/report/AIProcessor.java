@@ -142,6 +142,9 @@ public class AIProcessor {
                 if (activity.url() != null && !activity.url().isEmpty()) {
                     map.put("url", activity.url());
                 }
+                if (activity.contentUrls() != null && !activity.contentUrls().isEmpty()) {
+                    map.put("contentUrls", activity.contentUrls());
+                }
                 map.put("timestamp", activity.timestamp().toString());
                 return map;
             })
