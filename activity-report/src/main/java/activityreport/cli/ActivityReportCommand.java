@@ -17,6 +17,10 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.IVersionProvider;
 import picocli.CommandLine.Option;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -137,14 +141,18 @@ public class ActivityReportCommand implements Runnable {
             Log.infof("\nTotal activities found: %d", allActivities.size());
 
             if (allActivities.isEmpty()) {
-                System.out.println("# Activity Report\n");
-                System.out.println("No activities found for the specified date range.\n");
+                StringBuilder emptyReport = new StringBuilder();
+                emptyReport.append("# Activity Report\n\n");
+                emptyReport.append("No activities found for the specified date range.\n\n");
                 if (!errors.isEmpty()) {
-                    System.out.println("## Errors\n");
+                    emptyReport.append("## Errors\n\n");
                     for (String error : errors) {
-                        System.out.println("- " + error + "\n");
+                        emptyReport.append("- ").append(error).append("\n");
                     }
                 }
+                Path outputPath = writeReportToFile(emptyReport.toString(), startDate, endDate);
+                Log.infof("\nReport written to: %s", outputPath);
+                openInEditor(outputPath);
                 return;
             }
 
@@ -168,8 +176,9 @@ public class ActivityReportCommand implements Runnable {
                 report = aiProcessor.generateGroupedReport(allActivities, startDate, endDate);
             }
 
-            // Output the report
-            System.out.println(report);
+            // Write report to file
+            Path outputPath = writeReportToFile(report, startDate, endDate);
+            Log.infof("\nReport written to: %s", outputPath);
 
             // Report any errors at the end
             if (!errors.isEmpty()) {
@@ -179,10 +188,67 @@ public class ActivityReportCommand implements Runnable {
                 }
             }
 
+            // Open in editor
+            openInEditor(outputPath);
+
         } catch (Exception e) {
             Log.errorf("%s", e.getMessage());
             Log.error("", e);
             System.exit(1);
+        }
+    }
+
+    /**
+     * Write report to file in XDG_DATA_HOME directory.
+     * Uses a temporary file and only moves to final location on success.
+     */
+    private Path writeReportToFile(String report, Instant startDate, Instant endDate) throws IOException {
+        // Determine output directory using XDG standards
+        String xdgDataHome = System.getenv("XDG_DATA_HOME");
+        Path dataDir;
+        if (xdgDataHome != null && !xdgDataHome.isEmpty()) {
+            dataDir = Path.of(xdgDataHome, "activity-report");
+        } else {
+            dataDir = Path.of(System.getProperty("user.home"), ".local", "share", "activity-report");
+        }
+
+        // Create directory if it doesn't exist
+        Files.createDirectories(dataDir);
+
+        // Generate filename based on date range
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault());
+        String filename = String.format("report_%s_to_%s.md",
+            formatter.format(startDate),
+            formatter.format(endDate));
+
+        Path finalPath = dataDir.resolve(filename);
+        Path tempPath = dataDir.resolve(filename + ".tmp");
+
+        // Write to temporary file
+        Files.writeString(tempPath, report);
+
+        // Move to final location (atomic operation)
+        Files.move(tempPath, finalPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+
+        return finalPath;
+    }
+
+    /**
+     * Open the report file using xdg-open.
+     */
+    private void openInEditor(Path filePath) {
+        Log.infof("\nReport file: %s", filePath);
+
+        try {
+            Log.info("Opening report...\n");
+
+            ProcessBuilder pb = new ProcessBuilder("xdg-open", filePath.toString());
+            pb.start();
+
+            // Don't wait for the application to close - xdg-open will launch it and return immediately
+
+        } catch (IOException e) {
+            Log.warnf("Failed to open file: %s", e.getMessage());
         }
     }
 

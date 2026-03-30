@@ -177,6 +177,8 @@ Generate a report for the last 7 days:
 report
 ```
 
+The report will be automatically saved to `~/.local/share/activity-report/report_YYYY-MM-DD_to_YYYY-MM-DD.md` and opened in your preferred editor.
+
 ### Specify Number of Days
 
 ```bash
@@ -199,12 +201,19 @@ report --start-date 2024-02-01 --end-date 2024-02-15
 report --no-ai
 ```
 
+### Opening the Report
 
-### Save Report to File
+The report is automatically opened using `xdg-open`, which will use your system's default application for markdown files. This could be a text editor, IDE, or markdown viewer depending on your system configuration.
 
-```bash
-report > report.md
-```
+If `xdg-open` is not available or fails, the file path will be displayed for manual opening.
+
+### Report Location
+
+Reports are stored in the XDG data directory:
+- `$XDG_DATA_HOME/activity-report/` if `XDG_DATA_HOME` is set
+- `~/.local/share/activity-report/` otherwise
+
+Each report is named based on its date range, e.g., `report_2024-02-01_to_2024-02-15.md`.
 
 ### Full Command Reference
 
