@@ -85,16 +85,17 @@ public class JiraProvider implements ActivityProvider {
             .clientLogger(new TraceClientLogger())
             .build(JiraRestClient.class);
 
-        // Build JQL query
+        // Build JQL query - find all issues the user participated in (created, commented, assigned)
         long daysAgo = Duration.between(startDate, Instant.now()).toDays();
-        var jql = String.format("assignee = currentUser() AND updated >= -%dd ORDER BY updated DESC", daysAgo + 1);
+        var jql = String.format("participant = currentUser() AND updated >= -%dd ORDER BY updated DESC", daysAgo + 1);
 
-        // Build request body for new POST /search/jql endpoint
+        // Build request body - expand changelog and renderedFields
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode request = mapper.createObjectNode();
         request.put("jql", jql);
-        request.putArray("fields").add("key").add("summary").add("status").add("created").add("updated").add("issuetype");
+        request.putArray("fields").add("key").add("summary").add("status").add("updated").add("issuetype");
         request.put("maxResults", 100);
+        request.put("expand", "changelog,renderedFields");
 
         // Make API call
         var root = client.search(request);
@@ -102,42 +103,119 @@ public class JiraProvider implements ActivityProvider {
 
         if (issues != null && issues.isArray()) {
             for (JsonNode issue : issues) {
-                Instant updatedTime = Instant.parse(issue.get("fields").get("updated").asText());
-
-                // Skip if outside date range
-                if (updatedTime.isBefore(startDate) || updatedTime.isAfter(endDate)) {
-                    continue;
-                }
-
                 String key = issue.get("key").asText();
-                String summary = issue.get("fields").get("summary").asText();
-                String issueType = issue.get("fields").get("issuetype").get("name").asText();
-                String status = issue.get("fields").get("status").get("name").asText();
-                String issueUrl = instance.url + "/browse/" + key;
 
-                Activity activity = new Activity(
-                    "JIRA - " + instance.name,
-                    "issue",
-                    key + ": " + summary,
-                    "Type: " + issueType + ", Status: " + status,
-                    issueUrl,
-                    updatedTime
-                );
+                try {
+                    String summary = issue.get("fields").get("summary").asText();
+                    String issueType = issue.get("fields").get("issuetype").get("name").asText();
+                    String status = issue.get("fields").get("status").get("name").asText();
+                    String issueUrl = instance.url + "/browse/" + key;
 
-                activity.addMetadata("issueType", issueType);
-                activity.addMetadata("status", status);
+                    // Collect content URLs from user's actions in the time period
+                    List<String> contentUrls = new ArrayList<>();
+                    Instant latestUserActivity = null;
 
-                // Add default project if configured
-                if (instance.defaultProject != null) {
-                    activity.addMetadata("defaultProject", instance.defaultProject);
+                    // Parse changelog to find user's actions during the time period
+                    var changelog = issue.get("changelog");
+                    if (changelog != null && changelog.get("histories") != null) {
+                        for (JsonNode history : changelog.get("histories")) {
+                            String createdStr = history.get("created").asText();
+                            Instant changeDate = Instant.parse(createdStr);
+
+                            // Skip if outside date range
+                            if (changeDate.isBefore(startDate) || changeDate.isAfter(endDate)) {
+                                continue;
+                            }
+
+                            // Check if this change was made by the current user (by email)
+                            var author = history.get("author");
+                            if (author != null && author.get("emailAddress") != null) {
+                                String authorEmail = author.get("emailAddress").asText();
+                                if (instance.email.equals(authorEmail)) {
+                                    // Update latest activity timestamp
+                                    if (latestUserActivity == null || changeDate.isAfter(latestUserActivity)) {
+                                        latestUserActivity = changeDate;
+                                    }
+
+                                    // Check if this history entry contains a comment
+                                    var items = history.get("items");
+                                    if (items != null && items.isArray()) {
+                                        for (JsonNode item : items) {
+                                            String field = item.get("field").asText();
+                                            if ("comment".equals(field)) {
+                                                // Comment was added - extract comment ID
+                                                String commentId = item.get("to").asText();
+                                                if (commentId != null && !commentId.isEmpty()) {
+                                                    String commentUrl = instance.url + "/browse/" + key + "?focusedCommentId=" + commentId + "#comment-" + commentId;
+                                                    contentUrls.add(commentUrl);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Extract pull request URLs from rendered description
+                    extractPullRequestUrls(issue, instance.url, key, contentUrls);
+
+                    // Only create activity if user had activity during the time period
+                    if (latestUserActivity != null) {
+                        Activity activity = new Activity(
+                            "JIRA - " + instance.name,
+                            "issue",
+                            key + ": " + summary,
+                            "Type: " + issueType + ", Status: " + status,
+                            issueUrl,
+                            latestUserActivity,
+                            contentUrls
+                        );
+
+                        activity.addMetadata("issueType", issueType);
+                        activity.addMetadata("status", status);
+
+                        // Add default project if configured
+                        if (instance.defaultProject != null) {
+                            activity.addMetadata("defaultProject", instance.defaultProject);
+                        }
+
+                        activities.add(activity);
+                    }
+                } catch (Exception e) {
+                    Log.tracef("Failed to fetch details for issue %s: %s", key, e.getMessage());
                 }
-
-                activities.add(activity);
             }
         }
 
         Log.infof("Found %d activities from JIRA instance: %s", activities.size(), instance.name);
 
         return activities;
+    }
+
+    private void extractPullRequestUrls(JsonNode issue, String baseUrl, String key, List<String> contentUrls) {
+        try {
+            // Check rendered fields for GitHub/GitLab PR links in description or comments
+            var renderedFields = issue.get("renderedFields");
+            if (renderedFields != null && renderedFields.get("description") != null) {
+                String description = renderedFields.get("description").asText();
+                // Look for GitHub/GitLab PR URLs in the description
+                extractUrlsFromHtml(description, contentUrls);
+            }
+        } catch (Exception e) {
+            Log.tracef("Failed to extract PR URLs from issue %s: %s", key, e.getMessage());
+        }
+    }
+
+    private void extractUrlsFromHtml(String html, List<String> contentUrls) {
+        // Simple regex to find GitHub/GitLab PR URLs
+        // Matches: https://github.com/owner/repo/pull/123 or https://gitlab.com/owner/repo/-/merge_requests/123
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+            "https://(?:github\\.com|gitlab\\.com)/[\\w.-]+/[\\w.-]+/(?:pull|merge_requests|-/merge_requests)/\\d+"
+        );
+        java.util.regex.Matcher matcher = pattern.matcher(html);
+        while (matcher.find()) {
+            contentUrls.add(matcher.group());
+        }
     }
 }
