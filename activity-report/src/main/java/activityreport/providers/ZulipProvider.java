@@ -87,8 +87,8 @@ public class ZulipProvider implements ActivityProvider {
         var userRoot = client.getCurrentUser();
         int userId = userRoot.get("user_id").asInt();
 
-        // Fetch messages sent by this user
-        var narrow = String.format("[{\"operator\":\"sender\",\"operand\":%d}]", userId);
+        // Fetch messages sent by this user (exclude private messages using negation)
+        var narrow = String.format("[{\"operator\":\"sender\",\"operand\":%d},{\"operator\":\"is\",\"operand\":\"dm\",\"negated\":true}]", userId);
         var messagesRoot = client.getMessages("newest", 1000, 0, narrow);
         var messages = messagesRoot.get("messages");
 
