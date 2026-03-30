@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkus.logging.Log;
-import org.eclipse.microprofile.rest.client.RestClientBuilder;
+import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 
 import java.net.URI;
 import java.time.Duration;
@@ -71,7 +71,7 @@ public class JiraProvider implements ActivityProvider {
         List<Activity> activities = new ArrayList<>();
 
         // Build REST client for this instance
-        var client = RestClientBuilder.newBuilder()
+        var client = QuarkusRestClientBuilder.newBuilder()
             .baseUri(URI.create(instance.url))
             .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)

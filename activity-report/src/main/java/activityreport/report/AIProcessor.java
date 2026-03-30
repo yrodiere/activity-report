@@ -6,7 +6,7 @@ import activityreport.model.Activity;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.quarkus.logging.Log;
-import org.eclipse.microprofile.rest.client.RestClientBuilder;
+import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 
 import java.net.URI;
 import java.time.Instant;
@@ -29,7 +29,7 @@ public class AIProcessor {
             .orElse("http://localhost:8000/v1");
 
         // Build REST client
-        this.client = RestClientBuilder.newBuilder()
+        this.client = QuarkusRestClientBuilder.newBuilder()
             .baseUri(URI.create(aiUrl))
             .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)

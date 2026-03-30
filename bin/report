@@ -16,13 +16,12 @@ if [ ! -d "$QUARKUS_APP" ] || [ "$PROJECT_DIR/pom.xml" -nt "$QUARKUS_APP/quarkus
     echo "" >&2
 fi
 
-# Parse --debug flag
 JVM_ARGS=""
 APP_ARGS=()
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --debug)
-            JVM_ARGS+=" -Dquarkus.log.console.level=DEBUG"
+        --trace)
+            JVM_ARGS+=" -Dquarkus.log.console.level=TRACE"
             shift
             ;;
         -J)
