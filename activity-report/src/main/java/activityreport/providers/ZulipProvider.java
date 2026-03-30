@@ -10,9 +10,11 @@ import io.quarkus.logging.Log;
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Zulip Activity Provider supporting multiple instances
@@ -83,8 +85,18 @@ public class ZulipProvider implements ActivityProvider {
         var messagesRoot = client.getMessages("newest", 1000, 0, narrow);
         var messages = messagesRoot.get("messages");
 
+        // Group messages by topic (stream + subject)
+        Map<TopicRef, TopicMessages> topicMap = new HashMap<>();
+
         if (messages != null && messages.isArray()) {
             for (JsonNode message : messages) {
+                String messageType = message.get("type").asText();
+
+                // Skip DMs (private messages)
+                if ("private".equals(messageType)) {
+                    continue;
+                }
+
                 long timestamp = message.get("timestamp").asLong();
                 Instant messageTime = Instant.ofEpochSecond(timestamp);
 
@@ -93,30 +105,98 @@ public class ZulipProvider implements ActivityProvider {
                     continue;
                 }
 
+                String streamName = message.get("display_recipient").asText();
                 String subject = message.get("subject").asText();
-                String content = message.get("content").asText();
-                String messageType = message.get("type").asText();
                 int messageId = message.get("id").asInt();
 
-                // Build message URL
-                String streamName = messageType.equals("stream") ?
-                    message.get("display_recipient").asText() : "private";
-                String messageUrl = instance.url + "/#narrow/stream/" + streamName + "/topic/" + subject + "/near/" + messageId;
+                TopicRef topicRef = new TopicRef(streamName, subject);
+                TopicMessages topicMessages = topicMap.computeIfAbsent(topicRef,
+                    k -> new TopicMessages(streamName, subject, new ArrayList<>()));
+
+                topicMessages.messageIds.add(messageId);
+                topicMessages.updateTimestamp(messageTime);
+            }
+        }
+
+        // Create one activity per topic
+        String source = "Zulip - " + instance.url.replace("https://", "").replace("http://", "");
+
+        for (TopicMessages topic : topicMap.values()) {
+            try {
+                // Build links
+                List<String> links = new ArrayList<>();
+
+                // Topic link
+                String topicUrl = buildTopicUrl(instance.url, topic.streamName, topic.subject);
+                links.add("Topic: " + topicUrl);
+
+                // Message links
+                for (int messageId : topic.messageIds) {
+                    String messageUrl = buildMessageUrl(instance.url, topic.streamName, topic.subject, messageId);
+                    links.add("Message: " + messageUrl);
+                }
+
+                String description = String.join("\n", links);
 
                 Activity activity = new Activity(
-                    "Zulip - " + instance.url.replace("https://", "").replace("http://", ""),
-                    "message",
-                    "Message in " + streamName + ": " + subject,
-                    content.length() > 200 ? content.substring(0, 200) + "..." : content,
-                    messageUrl,
-                    messageTime
+                    source,
+                    "topic",
+                    topic.streamName + " / " + topic.subject,
+                    description,
+                    topicUrl,
+                    topic.latestTimestamp
                 );
 
-                activity.addMetadata("messageType", messageType);
                 activities.add(activity);
+            } catch (Exception e) {
+                Log.tracef("Failed to create activity for topic %s/%s: %s",
+                    topic.streamName, topic.subject, e.getMessage());
             }
         }
 
         return activities;
+    }
+
+    private record TopicRef(String streamName, String subject) {}
+
+    private static class TopicMessages {
+        final String streamName;
+        final String subject;
+        final List<Integer> messageIds;
+        Instant latestTimestamp;
+
+        TopicMessages(String streamName, String subject, List<Integer> messageIds) {
+            this.streamName = streamName;
+            this.subject = subject;
+            this.messageIds = messageIds;
+        }
+
+        void updateTimestamp(Instant timestamp) {
+            if (latestTimestamp == null || timestamp.isAfter(latestTimestamp)) {
+                latestTimestamp = timestamp;
+            }
+        }
+    }
+
+    private String buildTopicUrl(String baseUrl, String streamName, String subject) {
+        try {
+            String encodedStream = URLEncoder.encode(streamName, StandardCharsets.UTF_8);
+            String encodedSubject = URLEncoder.encode(subject, StandardCharsets.UTF_8);
+            return baseUrl + "/#narrow/stream/" + encodedStream + "/topic/" + encodedSubject;
+        } catch (Exception e) {
+            // Fallback to non-encoded if encoding fails
+            return baseUrl + "/#narrow/stream/" + streamName + "/topic/" + subject;
+        }
+    }
+
+    private String buildMessageUrl(String baseUrl, String streamName, String subject, int messageId) {
+        try {
+            String encodedStream = URLEncoder.encode(streamName, StandardCharsets.UTF_8);
+            String encodedSubject = URLEncoder.encode(subject, StandardCharsets.UTF_8);
+            return baseUrl + "/#narrow/stream/" + encodedStream + "/topic/" + encodedSubject + "/near/" + messageId;
+        } catch (Exception e) {
+            // Fallback to non-encoded if encoding fails
+            return baseUrl + "/#narrow/stream/" + streamName + "/topic/" + subject + "/near/" + messageId;
+        }
     }
 }
