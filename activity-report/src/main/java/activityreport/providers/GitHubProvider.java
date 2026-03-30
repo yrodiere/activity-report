@@ -125,7 +125,71 @@ public class GitHubProvider implements ActivityProvider {
             }
         }
 
+        // Deduplicate activities by URL (multiple instances may see the same issue/PR)
+        allActivities = deduplicateActivities(allActivities);
+
         return allActivities;
+    }
+
+    /**
+     * Deduplicate activities by URL, merging content URLs from duplicates.
+     * When multiple instances report the same issue/PR, we keep one and merge all content URLs.
+     */
+    private List<Activity> deduplicateActivities(List<Activity> activities) {
+        Map<String, List<Activity>> byUrl = new LinkedHashMap<>();
+
+        // Group by URL
+        for (Activity activity : activities) {
+            String url = activity.url();
+            if (url != null && !url.isEmpty()) {
+                byUrl.computeIfAbsent(url, k -> new ArrayList<>()).add(activity);
+            }
+        }
+
+        List<Activity> deduplicated = new ArrayList<>();
+        int duplicatesRemoved = 0;
+
+        // Merge duplicates
+        for (List<Activity> group : byUrl.values()) {
+            if (group.size() == 1) {
+                deduplicated.add(group.get(0));
+            } else {
+                // Multiple instances reported the same activity - merge them
+                duplicatesRemoved += group.size() - 1;
+
+                Activity first = group.get(0);
+
+                // Collect all unique content URLs from all duplicates
+                Set<String> mergedContentUrls = new LinkedHashSet<>();
+                for (Activity activity : group) {
+                    if (activity.contentUrls() != null) {
+                        mergedContentUrls.addAll(activity.contentUrls());
+                    }
+                }
+
+                // Create merged activity (keep first's metadata, but merge content URLs)
+                Activity merged = new Activity(
+                    first.source(),
+                    first.action(),
+                    first.actionCategory(),
+                    first.title(),
+                    first.description(),
+                    first.url(),
+                    first.timestamp(),
+                    new ArrayList<>(mergedContentUrls),
+                    first.project(),
+                    first.metadata()
+                );
+
+                deduplicated.add(merged);
+            }
+        }
+
+        if (duplicatesRemoved > 0) {
+            Log.infof("Removed %d duplicate activities from multiple GitHub instances", duplicatesRemoved);
+        }
+
+        return deduplicated;
     }
 
     private record IssueRef(String repoFullName, int number) {}

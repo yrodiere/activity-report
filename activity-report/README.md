@@ -360,7 +360,9 @@ providers:
 
 ### Multiple GitHub Instances
 
-You can configure both GitHub.com and GitHub Enterprise:
+You can configure multiple GitHub instances for different purposes:
+
+**GitHub Enterprise:**
 
 ```yaml
 providers:
@@ -376,6 +378,31 @@ providers:
         username: "work-account"
         token: "${GHE_TOKEN}"
 ```
+
+**Fine-Grained Tokens for Organization Private Repos:**
+
+GitHub's fine-grained tokens provide read-only access (better security) but must be scoped per organization. You can use multiple instances with different tokens to cover all your organizations:
+
+```yaml
+providers:
+  github:
+    enabled: true
+    instances:
+      - name: "Personal & Public"
+        token: "${GITHUB_PERSONAL_TOKEN}"  # Fine-grained token for personal repos
+      - name: "Org A"
+        token: "${GITHUB_ORG_A_TOKEN}"     # Fine-grained token authorized for Org A
+      - name: "Org B"
+        token: "${GITHUB_ORG_B_TOKEN}"     # Fine-grained token authorized for Org B
+```
+
+**Note:** The tool automatically deduplicates activities, so if multiple tokens have access to the same repository, each issue/PR will only appear once in the report.
+
+**Token Permissions:**
+- **Classic tokens:** Require `repo` scope (grants write access to all repos)
+- **Fine-grained tokens:** Can use read-only permissions:
+  - Repository permissions: Issues (Read), Pull requests (Read), Metadata (Read)
+  - Must be explicitly authorized for each organization with private repos
 
 ### Multiple JIRA/Zulip Instances
 
