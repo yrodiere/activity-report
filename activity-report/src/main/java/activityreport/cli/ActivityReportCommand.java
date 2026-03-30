@@ -9,6 +9,7 @@ import activityreport.providers.ZulipProvider;
 import activityreport.report.AIProcessor;
 import activityreport.report.MarkdownReportGenerator;
 import io.quarkus.logging.Log;
+import io.quarkus.picocli.runtime.annotations.TopCommand;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.ConfigProvider;
 import picocli.CommandLine.Command;
@@ -23,6 +24,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
+@TopCommand
 @Command(
     name = "report",
     mixinStandardHelpOptions = true,
