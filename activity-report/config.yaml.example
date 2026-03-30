@@ -72,19 +72,19 @@ ai:
 # The report will have sections for each project, plus a "Misc" section for unclassified items.
 projects:
   - name: "Quarkus"
-    urlPatterns:
+    url-patterns:
       - "https://github.com/quarkusio/*"
       - "https://github.com/quarkiverse/*"
   - name: "Hibernate ORM"
-    urlPatterns:
+    url-patterns:
       - "https://github.com/hibernate/hibernate-orm/*"
       - "https://redhat.atlassian.net/browse/HHH-*"
   - name: "Hibernate Search"
-    urlPatterns:
+    url-patterns:
       - "https://github.com/hibernate/hibernate-search/*"
       - "https://redhat.atlassian.net/browse/HSEARCH-*"
   - name: "Infrastructure"
-    urlPatterns:
+    url-patterns:
       - "https://github.com/hibernate/hibernate.org/*"
 
 # Project Assignment:
