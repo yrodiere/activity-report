@@ -8,9 +8,9 @@ import org.kohsuke.github.*;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -75,8 +75,12 @@ public class GitHubProvider implements ActivityProvider {
 
             try {
                 GHUser currentUser = github.getMyself();
-                PagedIterable<GHEventInfo> events = currentUser.listEvents();
 
+                // Step 1: Use events API to discover issues/PRs
+                Set<IssueRef> issueRefs = new HashSet<>();
+                Set<IssueRef> prRefs = new HashSet<>();
+
+                PagedIterable<GHEventInfo> events = currentUser.listEvents();
                 for (GHEventInfo event : events) {
                     try {
                         Date eventDate = event.getCreatedAt();
@@ -92,17 +96,17 @@ public class GitHubProvider implements ActivityProvider {
                             continue;
                         }
 
-                        // Parse different event types
-                        Activity activity = parseGitHubEvent(instanceName, event);
-                        if (activity != null) {
-                            allActivities.add(activity);
-                        }
+                        // Extract issue/PR references from events
+                        extractReferences(event, issueRefs, prRefs);
                     } catch (Exception e) {
-                        // Log and skip individual events that fail to parse
-                        Log.tracef("Failed to parse GitHub event (type: %s): %s",
-                            event.getType(), e.getMessage());
+                        Log.tracef("Failed to process event: %s", e.getMessage());
                     }
                 }
+
+                // Step 2: Fetch full details for each unique issue/PR
+                allActivities.addAll(fetchIssueDetails(github, instanceName, issueRefs, startDate, endDate));
+                allActivities.addAll(fetchPullRequestDetails(github, instanceName, prRefs, startDate, endDate));
+
             } catch (Exception e) {
                 Log.warnf("Error fetching from %s: %s", instanceName, e.getMessage());
             }
@@ -111,155 +115,152 @@ public class GitHubProvider implements ActivityProvider {
         return allActivities;
     }
 
-    private Activity parseGitHubEvent(String instanceName, GHEventInfo event) throws IOException {
-        String source = "GitHub - " + instanceName;
-        Instant timestamp = event.getCreatedAt().toInstant();
+    private record IssueRef(String repoFullName, int number) {}
 
-        return switch (event.getType()) {
-            case PUSH -> {
-                var pushPayload = event.getPayload(GHEventPayload.Push.class);
-                if (pushPayload != null && pushPayload.getCommits() != null && !pushPayload.getCommits().isEmpty()) {
-                    var commits = pushPayload.getCommits();
-                    int commitCount = commits.size();
-                    String ref = pushPayload.getRef();
-                    String branch = ref != null && ref.startsWith("refs/heads/") ?
-                        ref.substring("refs/heads/".length()) : ref;
-
-                    String repoUrl = "";
-                    try {
-                        var repo = pushPayload.getRepository();
-                        if (repo != null) {
-                            repoUrl = repo.getHtmlUrl().toString();
-                        }
-                    } catch (Exception e) {
-                        // Ignore if repo URL not available
-                    }
-
-                    String commitMessages = commits.stream()
-                        .filter(c -> c != null && c.getMessage() != null)
-                        .map(c -> c.getMessage())
-                        .collect(Collectors.joining("; "));
-
-                    yield new Activity(
-                        source,
-                        "push",
-                        "Pushed " + commitCount + " commit" + (commitCount > 1 ? "s" : "") + " to " + branch,
-                        commitMessages,
-                        repoUrl,
-                        timestamp
-                    );
-                }
-                yield null;
-            }
-
-            case PULL_REQUEST -> {
-                var prPayload = event.getPayload(GHEventPayload.PullRequest.class);
-                if (prPayload != null && prPayload.getPullRequest() != null) {
-                    var pr = prPayload.getPullRequest();
-                    String action = prPayload.getAction();
-
-                    yield new Activity(
-                        source,
-                        "pull_request",
-                        action.substring(0, 1).toUpperCase() + action.substring(1) + " PR #" + pr.getNumber() + ": " + pr.getTitle(),
-                        pr.getBody() != null ? pr.getBody() : "",
-                        pr.getHtmlUrl().toString(),
-                        timestamp
-                    );
-                }
-                yield null;
-            }
-
+    private void extractReferences(GHEventInfo event, Set<IssueRef> issueRefs, Set<IssueRef> prRefs) throws IOException {
+        switch (event.getType()) {
             case ISSUES -> {
-                var issuePayload = event.getPayload(GHEventPayload.Issue.class);
-                if (issuePayload != null && issuePayload.getIssue() != null) {
-                    var issue = issuePayload.getIssue();
-                    String action = issuePayload.getAction();
+                var payload = event.getPayload(GHEventPayload.Issue.class);
+                if (payload != null && payload.getIssue() != null) {
+                    var issue = payload.getIssue();
+                    issueRefs.add(new IssueRef(issue.getRepository().getFullName(), issue.getNumber()));
+                }
+            }
+            case ISSUE_COMMENT -> {
+                var payload = event.getPayload(GHEventPayload.IssueComment.class);
+                if (payload != null && payload.getIssue() != null) {
+                    var issue = payload.getIssue();
+                    if (issue.isPullRequest()) {
+                        prRefs.add(new IssueRef(issue.getRepository().getFullName(), issue.getNumber()));
+                    } else {
+                        issueRefs.add(new IssueRef(issue.getRepository().getFullName(), issue.getNumber()));
+                    }
+                }
+            }
+            case PULL_REQUEST, PULL_REQUEST_REVIEW, PULL_REQUEST_REVIEW_COMMENT -> {
+                GHPullRequest pr = null;
+                if (event.getType() == GHEvent.PULL_REQUEST) {
+                    var payload = event.getPayload(GHEventPayload.PullRequest.class);
+                    if (payload != null) pr = payload.getPullRequest();
+                } else if (event.getType() == GHEvent.PULL_REQUEST_REVIEW) {
+                    var payload = event.getPayload(GHEventPayload.PullRequestReview.class);
+                    if (payload != null) pr = payload.getPullRequest();
+                } else if (event.getType() == GHEvent.PULL_REQUEST_REVIEW_COMMENT) {
+                    var payload = event.getPayload(GHEventPayload.PullRequestReviewComment.class);
+                    if (payload != null) pr = payload.getPullRequest();
+                }
+                if (pr != null) {
+                    prRefs.add(new IssueRef(pr.getRepository().getFullName(), pr.getNumber()));
+                }
+            }
+        }
+    }
 
-                    yield new Activity(
+    private List<Activity> fetchIssueDetails(GitHub github, String instanceName, Set<IssueRef> issueRefs, Instant startDate, Instant endDate) {
+        List<Activity> activities = new ArrayList<>();
+        String source = "GitHub - " + instanceName;
+
+        for (IssueRef ref : issueRefs) {
+            try {
+                GHRepository repo = github.getRepository(ref.repoFullName);
+                GHIssue issue = repo.getIssue(ref.number);
+
+                Instant updatedAt = issue.getUpdatedAt().toInstant();
+
+                // Collect all relevant links within date range
+                List<String> links = new ArrayList<>();
+                links.add("Issue: " + issue.getHtmlUrl());
+
+                // Add comment links
+                for (GHIssueComment comment : issue.getComments()) {
+                    Instant commentDate = comment.getCreatedAt().toInstant();
+                    if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
+                        links.add("Comment: " + comment.getHtmlUrl());
+                    }
+                }
+
+                // Only create activity if there were interactions in the date range
+                if (links.size() > 1 || (!updatedAt.isBefore(startDate) && !updatedAt.isAfter(endDate))) {
+                    String description = String.join("\n", links);
+
+                    Activity activity = new Activity(
                         source,
                         "issue",
-                        action.substring(0, 1).toUpperCase() + action.substring(1) + " issue #" + issue.getNumber() + ": " + issue.getTitle(),
-                        issue.getBody() != null ? issue.getBody() : "",
+                        ref.repoFullName + " #" + ref.number + ": " + issue.getTitle(),
+                        description,
                         issue.getHtmlUrl().toString(),
-                        timestamp
+                        updatedAt
                     );
+
+                    activities.add(activity);
                 }
-                yield null;
+            } catch (Exception e) {
+                Log.tracef("Failed to fetch issue %s#%d: %s", ref.repoFullName, ref.number, e.getMessage());
             }
+        }
 
-            case ISSUE_COMMENT -> {
-                var commentPayload = event.getPayload(GHEventPayload.IssueComment.class);
-                if (commentPayload != null && commentPayload.getComment() != null) {
-                    var comment = commentPayload.getComment();
-                    var commentIssue = commentPayload.getIssue();
+        return activities;
+    }
 
-                    yield new Activity(
+    private List<Activity> fetchPullRequestDetails(GitHub github, String instanceName, Set<IssueRef> prRefs, Instant startDate, Instant endDate) {
+        List<Activity> activities = new ArrayList<>();
+        String source = "GitHub - " + instanceName;
+
+        for (IssueRef ref : prRefs) {
+            try {
+                GHRepository repo = github.getRepository(ref.repoFullName);
+                GHPullRequest pr = repo.getPullRequest(ref.number);
+
+                Instant updatedAt = pr.getUpdatedAt().toInstant();
+
+                // Collect all relevant links within date range
+                List<String> links = new ArrayList<>();
+                links.add("Pull Request: " + pr.getHtmlUrl());
+
+                // Add comment links
+                for (GHIssueComment comment : pr.getComments()) {
+                    Instant commentDate = comment.getCreatedAt().toInstant();
+                    if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
+                        links.add("Comment: " + comment.getHtmlUrl());
+                    }
+                }
+
+                // Add review links
+                for (GHPullRequestReview review : pr.listReviews()) {
+                    Instant reviewDate = review.getSubmittedAt().toInstant();
+                    if (!reviewDate.isBefore(startDate) && !reviewDate.isAfter(endDate)) {
+                        links.add("Review: " + review.getHtmlUrl());
+                    }
+                }
+
+                // Add review comment links
+                for (GHPullRequestReviewComment reviewComment : pr.listReviewComments()) {
+                    Instant commentDate = reviewComment.getCreatedAt().toInstant();
+                    if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
+                        links.add("Review Comment: " + reviewComment.getHtmlUrl());
+                    }
+                }
+
+                // Only create activity if there were interactions in the date range
+                if (links.size() > 1 || (!updatedAt.isBefore(startDate) && !updatedAt.isAfter(endDate))) {
+                    String description = String.join("\n", links);
+
+                    Activity activity = new Activity(
                         source,
-                        "comment",
-                        "Commented on " + (commentIssue.isPullRequest() ? "PR" : "issue") + " #" + commentIssue.getNumber(),
-                        comment.getBody() != null ? comment.getBody() : "",
-                        comment.getHtmlUrl().toString(),
-                        timestamp
+                        "pull_request",
+                        ref.repoFullName + " #" + ref.number + ": " + pr.getTitle(),
+                        description,
+                        pr.getHtmlUrl().toString(),
+                        updatedAt
                     );
+
+                    activities.add(activity);
                 }
-                yield null;
+            } catch (Exception e) {
+                Log.tracef("Failed to fetch pull request %s#%d: %s", ref.repoFullName, ref.number, e.getMessage());
             }
+        }
 
-            case PULL_REQUEST_REVIEW -> {
-                var reviewPayload = event.getPayload(GHEventPayload.PullRequestReview.class);
-                if (reviewPayload != null && reviewPayload.getReview() != null) {
-                    var review = reviewPayload.getReview();
-                    var reviewPR = reviewPayload.getPullRequest();
-
-                    yield new Activity(
-                        source,
-                        "review",
-                        "Reviewed PR #" + reviewPR.getNumber() + ": " + reviewPR.getTitle(),
-                        review.getBody() != null ? review.getBody() : "",
-                        review.getHtmlUrl().toString(),
-                        timestamp
-                    );
-                }
-                yield null;
-            }
-
-            case PULL_REQUEST_REVIEW_COMMENT -> {
-                var reviewCommentPayload = event.getPayload(GHEventPayload.PullRequestReviewComment.class);
-                if (reviewCommentPayload != null && reviewCommentPayload.getComment() != null) {
-                    var reviewComment = reviewCommentPayload.getComment();
-                    var commentPR = reviewCommentPayload.getPullRequest();
-
-                    yield new Activity(
-                        source,
-                        "review_comment",
-                        "Commented on PR #" + commentPR.getNumber() + " review",
-                        reviewComment.getBody() != null ? reviewComment.getBody() : "",
-                        reviewComment.getHtmlUrl().toString(),
-                        timestamp
-                    );
-                }
-                yield null;
-            }
-
-            case RELEASE -> {
-                var releasePayload = event.getPayload(GHEventPayload.Release.class);
-                if (releasePayload != null && releasePayload.getRelease() != null) {
-                    var release = releasePayload.getRelease();
-
-                    yield new Activity(
-                        source,
-                        "release",
-                        "Published release " + release.getTagName(),
-                        release.getBody() != null ? release.getBody() : "",
-                        release.getHtmlUrl().toString(),
-                        timestamp
-                    );
-                }
-                yield null;
-            }
-
-            default -> null;
-        };
+        return activities;
     }
 }
