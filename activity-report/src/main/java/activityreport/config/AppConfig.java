@@ -48,6 +48,7 @@ public interface AppConfig {
             Optional<@URL String> url();
             Optional<String> username();
             Optional<String> token();
+            Optional<String> publicEventsToken();
             Optional<String> defaultProject();
         }
     }

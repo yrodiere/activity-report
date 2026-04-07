@@ -152,7 +152,69 @@ export ZULIP_API_KEY="xxxxxxxxxxxxx"
 
 ### Creating API Tokens
 
-See `config.yaml.example` for detailed instructions on obtaining tokens for each service.
+#### GitHub
+
+You have three options for GitHub authentication:
+
+**Option 1: Classic Token (Full Access)**
+1. Go to https://github.com/settings/tokens
+2. Click "Generate new token (classic)"
+3. Select scopes: `repo`, `read:user`, `user:email`
+4. Copy token and store in 1Password or as environment variable
+
+Note: The `repo` scope grants READ+WRITE access to all accessible repositories.
+
+**Option 2: Fine-Grained Token (Recommended for Security)**
+1. Go to https://github.com/settings/personal-access-tokens/new
+2. Set repository access and permissions:
+   - Repository access: Choose specific repos or "All repositories"
+   - Repository permissions: Issues (Read), Pull requests (Read), Metadata (Read)
+3. For organization private repos: Token must be authorized by the organization
+4. Copy token and store securely
+
+Note: Fine-grained tokens are READ-ONLY but filter events based on token scope. If you use a fine-grained token, you may need to also configure a `public-events-token` (see below).
+
+**Option 3: Public Events Token (For Fine-Grained Token Users)**
+
+If you use a fine-grained token as your main token, it will filter public events based on the token's repository/organization scope. This means you might miss public activities from organizations not accessible by your token.
+
+To work around this, create a separate classic token with **NO scopes** for fetching public events:
+1. Go to https://github.com/settings/tokens
+2. Click "Generate new token (classic)"
+3. **DO NOT select any scopes** (leave all checkboxes unchecked)
+4. Copy token and configure as `public-events-token` in your config
+
+Benefits:
+- Sees ALL public events without organization filtering
+- Higher rate limits (5000 requests/hour) vs unauthenticated access (60 requests/hour)
+- No write permissions (more secure)
+
+Example configuration:
+```yaml
+providers:
+  github:
+    instances:
+      - name: "GitHub.com"
+        token: "op://Private/GitHub-Fine-Grained/token"  # Fine-grained token
+        public-events-token: "op://Private/GitHub-Public-Events/token"  # No-scope classic token
+```
+
+#### JIRA
+
+**JIRA Cloud:**
+1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
+2. Click "Create API token"
+3. Copy token and store securely
+
+**JIRA Server/Data Center:**
+Use your JIRA password or create a personal access token in JIRA settings.
+
+#### Zulip
+
+1. Log in to your Zulip instance
+2. Go to: Settings → Account & privacy → API key
+3. Click "Show/change your API key"
+4. Copy API key and store securely
 
 ## Setting Up Podman AI Lab (Optional)
 

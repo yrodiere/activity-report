@@ -1,13 +1,6 @@
 # Activity Report Configuration
-# Copy this file to ~/.config/activity-report/config.yaml and configure your providers
-
-# ============================================================================
-# 1Password Integration (Optional - Recommended for Security)
-# ============================================================================
-# Use op:// references to securely load tokens from 1Password:
-#   token: op://Private/GitHub/token
-#
-# See README.md for detailed setup instructions and secret reference syntax.
+# Copy this file to ~/.config/activity-report/config.yaml
+# See README.md for detailed setup instructions
 
 providers:
   # GitHub (supports multiple instances: GitHub.com and GitHub Enterprise)
@@ -18,61 +11,42 @@ providers:
       - name: "GitHub.com"
         url: "https://api.github.com"
         username: "your-github-username"
-        # token: "op://Private/GitHub/token"  # 1Password reference (recommended)
-        # token: "op://Private/GitHub/token?account=my-work-account"  # Specify account if using multiple 1Password accounts
-        # token: "${GITHUB_TOKEN}"             # Or use environment variable
-        # token can be omitted entirely to use ~/.github property file
-        # defaultProject: "Quarkus"            # Optional: assign activities to this project by default
+        # token: "op://Private/GitHub/token"
+        # public-events-token: "op://Private/GitHub-Public-Events/token"
+        # default-project: "Quarkus"
 
       # GitHub Enterprise (optional)
       # - name: "Company GitHub Enterprise"
       #   url: "https://github.company.com/api/v3"
       #   username: "your-ghe-username"
-      #   token: "op://Work/GitHub-Enterprise/token?account=my-work-account"  # 1Password reference with account
-      #   defaultProject: "Infrastructure"     # Optional: default project for this instance
+      #   token: "op://Work/GitHub-Enterprise/token?account=my-work-account"
+      #   default-project: "Infrastructure"
 
   # JIRA (supports multiple instances)
   jira:
     enabled: false  # Set to true to enable
     instances:
-      # Example JIRA Cloud instance
       # - name: "Project JIRA"
       #   url: "https://yourcompany.atlassian.net"
       #   email: "your-email@example.com"
-      #   token: "op://Private/JIRA/token"  # 1Password reference (recommended)
-      #   # token: "op://Private/JIRA/token?account=my-work-account"  # Specify account if using multiple
-      #   # token: "${JIRA_TOKEN}"          # Or use environment variable
-      #   # Create token at: https://id.atlassian.com/manage-profile/security/api-tokens
-      #   defaultProject: "Infrastructure"  # Optional: default project for this instance
-
-      # Example JIRA Server instance
-      # - name: "Internal JIRA"
-      #   url: "https://jira.company.com"
-      #   email: "your-email@example.com"
-      #   token: "op://Private/JIRA-Internal/token"
-      #   defaultProject: "Hibernate ORM"   # Optional: default project for this instance
+      #   token: "op://Private/JIRA/token"
+      #   default-project: "Infrastructure"
 
   # Zulip (supports multiple instances)
   zulip:
     enabled: false  # Set to true to enable
     instances:
-      # Example Zulip instance
       # - url: "https://yourcompany.zulipchat.com"
       #   email: "your-email@example.com"
-      #   api_key: "op://Private/Zulip/api_key"  # 1Password reference (recommended)
-      #   # api_key: "op://Private/Zulip/api_key?account=my-work-account"  # Specify account if using multiple
-      #   # api_key: "${ZULIP_API_KEY}"          # Or use environment variable
-      #   # Get from: Settings -> Account & privacy -> API key
-      #   defaultProject: "Quarkus"             # Optional: default project for this instance
+      #   api_key: "op://Private/Zulip/api_key"
+      #   default-project: "Quarkus"
 
 # AI Configuration (for intelligent report grouping)
 ai:
   url: "http://localhost:8000/v1"  # Podman AI Lab default endpoint
   model: "auto"  # auto-detect from API, or specify model name
 
-# Project Classification (for organizing report by projects)
-# Activities are classified into projects based on URL pattern matching.
-# The report will have sections for each project, plus a "Misc" section for unclassified items.
+# Project classification (organizes report by projects based on URL patterns)
 projects:
   - name: "Quarkus"
     url-patterns:
@@ -90,62 +64,4 @@ projects:
     url-patterns:
       - "https://github.com/hibernate/hibernate.org/*"
 
-# Project Assignment:
-# 1. First, the tool tries to match the activity's main URL against configured patterns
-# 2. If no match, it tries to match URLs in the activity's content (comments, reviews, etc.)
-# 3. If still no match, it uses the instance's defaultProject (if configured)
-# 4. If still no match, the activity goes to the "Misc" section
-
-# ============================================================================
-# Credential Management
-# ============================================================================
-# Tokens can be specified using:
-#   - 1Password references: op://vault/item/field (recommended - secure)
-#   - Environment variables: ${VAR_NAME}
-#   - Hardcoded values (NOT recommended - insecure!)
-#
-# See README.md for detailed credential management options and 1Password setup.
-#
-# ============================================================================
-# How to Create API Tokens
-# ============================================================================
-#
-# GitHub:
-#   You have two options:
-#
-#   Option 1: Classic Token (simpler, but more permissive)
-#     1. Go to: https://github.com/settings/tokens
-#     2. Click "Generate new token (classic)"
-#     3. Select scopes: repo, read:user, user:email
-#     4. Copy token and store in 1Password or use as environment variable
-#     Note: 'repo' scope grants READ+WRITE access to all repos
-#
-#   Option 2: Fine-Grained Token (recommended for security, but requires one per org)
-#     1. Go to: https://github.com/settings/personal-access-tokens/new
-#     2. Set repository access and permissions:
-#        - Repository access: choose repos or "All repositories"
-#        - Repository permissions: Issues (Read), Pull requests (Read), Metadata (Read)
-#     3. For organization private repos: token must be authorized by the org
-#     4. Copy token and store in 1Password
-#     Note: Fine-grained tokens are READ-ONLY but require one token per organization
-#           with private repos. Configure multiple instances (see README) if needed.
-#
-#   Special: For GitHub.com only, you can omit the 'token' field entirely
-#   to use ~/.github property file (legacy method from Hub4j library)
-#
-# GitHub Enterprise:
-#   Same as GitHub, but use your enterprise instance URL
-#
-# JIRA Cloud:
-#   1. Go to: https://id.atlassian.com/manage-profile/security/api-tokens
-#   2. Click "Create API token"
-#   3. Copy token and store securely
-#
-# JIRA Server/Data Center:
-#   Use your JIRA password or create a personal access token in JIRA settings
-#
-# Zulip:
-#   1. Log in to your Zulip instance
-#   2. Go to: Settings -> Account & privacy -> API key
-#   3. Click "Show/change your API key"
-#   4. Copy API key and store securely
+# See README.md for detailed setup instructions, token creation, and credential management
