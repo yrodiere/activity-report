@@ -9,10 +9,7 @@ import org.kohsuke.github.*;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * GitHub Activity Provider supporting multiple instances (GitHub.com and GitHub Enterprise)
@@ -22,7 +19,7 @@ public class GitHubProvider implements ActivityProvider {
     private final List<GitHub> publicGithubClients;
     private final List<InstanceInfo> instanceInfos;
 
-    private record InstanceInfo(String name, String defaultProject) {}
+    private record InstanceInfo(String name, String defaultProject, CategoryFilterFunction categoryFilters) {}
 
     private static GitHub createGitHubClient(String url, String token) throws IOException {
         GitHubBuilder builder = new GitHubBuilder();
@@ -74,7 +71,8 @@ public class GitHubProvider implements ActivityProvider {
 
                         instanceInfos.add(new InstanceInfo(
                             instance.name(),
-                            instance.defaultProject().orElse(null)
+                            instance.defaultProject().orElse(null),
+                            new CategoryFilterFunction(instance.categoryFilters().orElse(List.of()))
                         ));
                     } catch (IOException e) {
                         Log.warnf("Failed to initialize GitHub instance %s: %s", instance.name(), e.getMessage());
@@ -400,12 +398,18 @@ public class GitHubProvider implements ActivityProvider {
                     }
                 }
 
+                // Determine action category: check filters first, otherwise DISCUSS
+                ActionCategory actionCategory = instanceInfo.categoryFilters.matchIssue(issue)
+                    .orElse(ActionCategory.DISCUSS);
+                if (actionCategory != ActionCategory.DISCUSS) {
+                    Log.tracef("  Issue %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
+                }
+
                 // Create activity - use event timestamp that discovered this issue
-                // Issues are always DISCUSS
                 Activity activity = new Activity(
                     source,
                     "issue",
-                    ActionCategory.DISCUSS,
+                    actionCategory,
                     ref.repoFullName + "#" + ref.number + ": " + issue.getTitle(),
                     "", // description
                     issue.getHtmlUrl().toString(),
@@ -442,14 +446,19 @@ public class GitHubProvider implements ActivityProvider {
 
                 Log.tracef("  PR %s#%d: eventTimestamp=%s", ref.repoFullName, ref.number, eventTimestamp);
 
-                // Determine action category based on PR authorship
-                ActionCategory actionCategory;
-                try {
-                    boolean isAuthor = pr.getUser().getLogin().equals(currentLogin);
-                    actionCategory = isAuthor ? ActionCategory.CODE : ActionCategory.REVIEW;
-                } catch (Exception e) {
-                    Log.tracef("Failed to determine PR author for %s#%d, defaulting to review: %s", ref.repoFullName, ref.number, e.getMessage());
-                    actionCategory = ActionCategory.REVIEW;
+                // Determine action category: check filters first, then based on PR authorship
+                ActionCategory actionCategory = instanceInfo.categoryFilters.matchPullRequest(pr)
+                    .orElseGet(() -> {
+                        try {
+                            boolean isAuthor = pr.getUser().getLogin().equals(currentLogin);
+                            return isAuthor ? ActionCategory.CODE : ActionCategory.REVIEW;
+                        } catch (Exception e) {
+                            Log.tracef("Failed to determine PR author for %s#%d, defaulting to review: %s", ref.repoFullName, ref.number, e.getMessage());
+                            return ActionCategory.REVIEW;
+                        }
+                    });
+                if (instanceInfo.categoryFilters.matchPullRequest(pr).isPresent()) {
+                    Log.tracef("  PR %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
                 }
 
                 // Collect all relevant links within date range

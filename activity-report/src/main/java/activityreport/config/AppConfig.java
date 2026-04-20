@@ -50,6 +50,14 @@ public interface AppConfig {
             Optional<String> token();
             Optional<String> publicEventsToken();
             Optional<String> defaultProject();
+            Optional<List<@Valid CategoryFilter>> categoryFilters();
+
+            interface CategoryFilter {
+                @NotBlank String category();
+                Optional<String> titlePattern();
+                Optional<String> label();
+                Optional<String> author();
+            }
         }
     }
 

@@ -371,6 +371,50 @@ If the AI model is not available:
 
 ## Advanced Configuration
 
+### Category Filters
+
+The tool can automatically categorize activities based on configurable filters. This is particularly useful for identifying maintenance activities (dependency updates, automated PRs) as "CHORE" instead of "CODE" or "REVIEW". Chores appear in their own section under "Misc" in the report.
+
+Configure category filters in your `config.yaml` for GitHub instances:
+
+```yaml
+providers:
+  github:
+    enabled: true
+    instances:
+      - name: "GitHub.com"
+        token: "${GITHUB_TOKEN}"
+        category-filters:
+          # Match Dependabot PRs by author
+          - category: "CHORE"
+            author: "dependabot[bot]"
+          
+          # Match Renovate PRs by author
+          - category: "CHORE"
+            author: "renovate[bot]"
+          
+          # Match dependency update PRs by title pattern
+          - category: "CHORE"
+            titlePattern: "^(chore|deps):"
+          
+          # Match PRs with specific label
+          - category: "CHORE"
+            label: "dependencies"
+          
+          # Combine multiple criteria (all must match)
+          - category: "CHORE"
+            titlePattern: "^Update.*version"
+            label: "maintenance"
+```
+
+**Filter Criteria:**
+- `category`: The category to assign (CODE, REVIEW, DISCUSS, or CHORE)
+- `titlePattern`: Regular expression to match against issue/PR titles
+- `label`: Exact label name that must be present
+- `author`: Exact GitHub login (e.g., `dependabot[bot]`, `renovate[bot]`)
+
+Multiple criteria within a single filter are AND-ed together (all must match). Multiple filters are OR-ed together. The first matching filter determines the category, overriding the default categorization logic.
+
 ### Project Classification
 
 The tool can organize your report by projects, creating sections like "Project: Quarkus", "Project: Hibernate ORM", etc. Activities are classified based on URL pattern matching.

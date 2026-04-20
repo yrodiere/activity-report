@@ -18,6 +18,7 @@ public class MarkdownReportGenerator {
         byProject.put("General", new ArrayList<>()); // Always empty, manually filled
 
         List<ActivityGroup> miscGroups = new ArrayList<>();
+        List<ActivityGroup> choreGroups = new ArrayList<>();
 
         for (ActivityGroup group : groups) {
             Activity primary = group.primary();
@@ -25,10 +26,13 @@ public class MarkdownReportGenerator {
             String project = primary.project();
 
             // CODE activities go to project sections (or "Unclassified" if no project)
-            // Non-CODE activities always go to miscGroups
+            // CHORE activities go to choreGroups
+            // Other activities go to miscGroups
             if (actionCategory == ActionCategory.CODE) {
                 String projectKey = (project != null && !project.isEmpty()) ? project : "Unclassified";
                 byProject.computeIfAbsent(projectKey, k -> new ArrayList<>()).add(group);
+            } else if (actionCategory == ActionCategory.CHORE) {
+                choreGroups.add(group);
             } else {
                 miscGroups.add(group);
             }
@@ -60,13 +64,22 @@ public class MarkdownReportGenerator {
             report.append("----\n\n");
         }
 
-        // Generate Misc section (reviews, discussions)
-        if (!miscGroups.isEmpty()) {
+        // Generate Misc section (reviews, discussions, chores)
+        if (!miscGroups.isEmpty() || !choreGroups.isEmpty()) {
             report.append("# Misc\n\n");
-            report.append("Reviews, triage, discussions\n\n");
 
-            for (ActivityGroup group : miscGroups) {
-                formatGroup(report, group);
+            if (!miscGroups.isEmpty()) {
+                report.append("Reviews, triage, discussions\n\n");
+                for (ActivityGroup group : miscGroups) {
+                    formatGroup(report, group);
+                }
+            }
+
+            if (!choreGroups.isEmpty()) {
+                report.append("Chores\n\n");
+                for (ActivityGroup group : choreGroups) {
+                    formatGroup(report, group);
+                }
             }
         }
 

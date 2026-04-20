@@ -17,5 +17,10 @@ public enum ActionCategory {
     /**
      * Discussions, triage, commenting on issues
      */
-    DISCUSS
+    DISCUSS,
+
+    /**
+     * Chores - maintenance tasks, dependency updates, automated PRs
+     */
+    CHORE
 }
