@@ -3,6 +3,7 @@ package activityreport.providers;
 import activityreport.client.BasicAuthRequestFilter;
 import activityreport.client.JiraRestClient;
 import activityreport.client.TraceClientLogger;
+import activityreport.util.UrlExtractor;
 import org.jboss.resteasy.reactive.client.api.LoggingScope;
 import activityreport.config.AppConfig;
 import activityreport.model.ActionCategory;
@@ -17,8 +18,7 @@ import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 /**
  * JIRA Activity Provider supporting multiple instances
@@ -28,7 +28,7 @@ public class JiraProvider implements ActivityProvider {
 
     private record JiraInstance(String name, String url, String email, String token, String defaultProject) {}
 
-    public JiraProvider(AppConfig config) {
+    public JiraProvider(AppConfig config, UrlExtractor urlExtractor) {
         this.instances = new ArrayList<>();
 
         config.providers().jira().ifPresent(jira -> {
@@ -41,6 +41,10 @@ public class JiraProvider implements ActivityProvider {
                         instance.token(),
                         instance.defaultProject().orElse(null)
                     ));
+
+                    // Register this instance for URL extraction
+                    List<String> projectKeys = instance.projectKeys().orElse(List.of());
+                    urlExtractor.registerJiraInstance(instance.url(), instance.name(), projectKeys);
                 }
             }
         });
@@ -57,12 +61,12 @@ public class JiraProvider implements ActivityProvider {
     }
 
     @Override
-    public List<Activity> fetchActivities(Instant startDate, Instant endDate) throws Exception {
+    public List<Activity> fetchActivities(Instant startDate, Instant endDate, UrlExtractor urlExtractor) throws Exception {
         List<Activity> allActivities = new ArrayList<>();
 
         for (JiraInstance instance : instances) {
             try {
-                allActivities.addAll(fetchFromInstance(instance, startDate, endDate));
+                allActivities.addAll(fetchFromInstance(instance, startDate, endDate, urlExtractor));
             } catch (Exception e) {
                 Log.warnf("Error fetching from JIRA instance %s: %s", instance.name, e.getMessage());
             }
@@ -71,7 +75,7 @@ public class JiraProvider implements ActivityProvider {
         return allActivities;
     }
 
-    private List<Activity> fetchFromInstance(JiraInstance instance, Instant startDate, Instant endDate) throws Exception {
+    private List<Activity> fetchFromInstance(JiraInstance instance, Instant startDate, Instant endDate, UrlExtractor urlExtractor) throws Exception {
         List<Activity> activities = new ArrayList<>();
 
         Log.infof("Fetching activities from JIRA instance: %s", instance.name);
@@ -158,10 +162,19 @@ public class JiraProvider implements ActivityProvider {
                         }
                     }
 
-                    // Extract pull request URLs from rendered description
-                    int prUrlsCount = contentUrls.size();
-                    extractPullRequestUrls(issue, instance.url, key, contentUrls);
-                    boolean hasPrUrls = contentUrls.size() > prUrlsCount;
+                    // Extract pull request URLs from summary and rendered description
+                    Set<String> externalUrls = new java.util.LinkedHashSet<>();
+                    urlExtractor.extractExternalUrls(summary, externalUrls);
+
+                    // Extract from description
+                    var renderedFields = issue.get("renderedFields");
+                    if (renderedFields != null && renderedFields.get("description") != null) {
+                        String description = renderedFields.get("description").asText();
+                        urlExtractor.extractExternalUrls(description, externalUrls);
+                    }
+
+                    contentUrls.addAll(externalUrls);
+                    boolean hasPrUrls = !externalUrls.isEmpty();
 
                     // Only create activity if user had activity during the time period
                     if (latestUserActivity != null) {
@@ -198,31 +211,5 @@ public class JiraProvider implements ActivityProvider {
         Log.infof("Found %d activities from JIRA instance: %s", activities.size(), instance.name);
 
         return activities;
-    }
-
-    private void extractPullRequestUrls(JsonNode issue, String baseUrl, String key, List<String> contentUrls) {
-        try {
-            // Check rendered fields for GitHub/GitLab PR links in description or comments
-            var renderedFields = issue.get("renderedFields");
-            if (renderedFields != null && renderedFields.get("description") != null) {
-                String description = renderedFields.get("description").asText();
-                // Look for GitHub/GitLab PR URLs in the description
-                extractUrlsFromHtml(description, contentUrls);
-            }
-        } catch (Exception e) {
-            Log.tracef("Failed to extract PR URLs from issue %s: %s", key, e.getMessage());
-        }
-    }
-
-    private void extractUrlsFromHtml(String html, List<String> contentUrls) {
-        // Simple regex to find GitHub/GitLab PR URLs
-        // Matches: https://github.com/owner/repo/pull/123 or https://gitlab.com/owner/repo/-/merge_requests/123
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
-            "https://(?:github\\.com|gitlab\\.com)/[\\w.-]+/[\\w.-]+/(?:pull|merge_requests|-/merge_requests)/\\d+"
-        );
-        java.util.regex.Matcher matcher = pattern.matcher(html);
-        while (matcher.find()) {
-            contentUrls.add(matcher.group());
-        }
     }
 }

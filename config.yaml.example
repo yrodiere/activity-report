@@ -31,6 +31,9 @@ providers:
       #   email: "your-email@example.com"
       #   token: "op://Private/JIRA/token"
       #   default-project: "Infrastructure"
+      #   project-keys:  # Optional: project keys to resolve (e.g., "PROJ-123")
+      #     - "PROJ"
+      #     - "TASK"
 
   # Zulip (supports multiple instances)
   zulip:

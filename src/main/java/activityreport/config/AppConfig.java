@@ -72,6 +72,7 @@ public interface AppConfig {
             @NotBlank @Email String email();
             @NotBlank String token();
             Optional<String> defaultProject();
+            Optional<List<String>> projectKeys();
         }
     }
 

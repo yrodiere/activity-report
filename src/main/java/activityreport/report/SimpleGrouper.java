@@ -64,10 +64,19 @@ public class SimpleGrouper {
                 continue;
             }
 
-            // Pick primary: first CODE activity, or just first activity
+            // Pick primary: prefer CODE > REVIEW > DISCUSS > CHORE
             Activity primary = groupSet.stream()
                 .filter(a -> a.actionCategory() == ActionCategory.CODE)
                 .findFirst()
+                .or(() -> groupSet.stream()
+                    .filter(a -> a.actionCategory() == ActionCategory.REVIEW)
+                    .findFirst())
+                .or(() -> groupSet.stream()
+                    .filter(a -> a.actionCategory() == ActionCategory.DISCUSS)
+                    .findFirst())
+                .or(() -> groupSet.stream()
+                    .filter(a -> a.actionCategory() == ActionCategory.CHORE)
+                    .findFirst())
                 .orElse(groupSet.iterator().next());
 
             // Secondary: all others

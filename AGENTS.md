@@ -1,5 +1,30 @@
 # Agents
 
+## Testing
+
+### Test Setup Guidelines
+
+When creating tests in this Quarkus project, choose the appropriate annotation:
+
+1. **No annotation** - For pure unit tests that don't need CDI
+   - Example: Testing utility classes like `SimpleGrouper`
+   - Fastest option, no Quarkus startup required
+   
+2. **`@QuarkusComponentTest`** - For testing specific CDI components
+   - Use when you need a specific bean but not the full application
+   - Lighter than full Quarkus test
+   
+3. **`@QuarkusTest`** - For integration tests involving large parts of the app
+   - Requires valid configuration (all providers must be configured)
+   - Consider using test profiles to override configuration
+   - Example: Add `@TestProfile(MyTestProfile.class)` to provide test config
+
+### Running Tests
+
+```bash
+mvn test -Dtest=ClassName
+```
+
 ## Config Documentation
 
 When working with configuration files in this project:

@@ -11,6 +11,7 @@ import activityreport.report.AIProcessor;
 import activityreport.report.MarkdownReportGenerator;
 import activityreport.report.ProjectClassifier;
 import activityreport.report.SimpleGrouper;
+import activityreport.util.UrlExtractor;
 import io.quarkus.logging.Log;
 import io.quarkus.picocli.runtime.annotations.TopCommand;
 import jakarta.inject.Inject;
@@ -44,6 +45,9 @@ public class ActivityReportCommand implements Runnable {
 
     @Inject
     AppConfig config;
+
+    @Inject
+    com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Option(names = {"-d", "--days"}, description = "Number of days to look back (default: 7)")
     private int days = 7;
@@ -96,25 +100,28 @@ public class ActivityReportCommand implements Runnable {
             Log.infof("Fetching activities from %s to %s\n",
                      formatter.format(startDate), formatter.format(endDate));
 
+            // Initialize URL extractor (providers will register their patterns)
+            UrlExtractor urlExtractor = new UrlExtractor();
+
             // Initialize providers
             List<ActivityProvider> providers = new ArrayList<>();
 
             if (config.providers().github().map(g -> g.enabled()).orElse(false)) {
-                var githubProvider = new GitHubProvider(config);
+                var githubProvider = new GitHubProvider(config, urlExtractor);
                 if (githubProvider.isConfigured()) {
                     providers.add(githubProvider);
                 }
             }
 
             if (config.providers().jira().map(j -> j.enabled()).orElse(false)) {
-                var jiraProvider = new JiraProvider(config);
+                var jiraProvider = new JiraProvider(config, urlExtractor);
                 if (jiraProvider.isConfigured()) {
                     providers.add(jiraProvider);
                 }
             }
 
             if (config.providers().zulip().map(z -> z.enabled()).orElse(false)) {
-                var zulipProvider = new ZulipProvider(config);
+                var zulipProvider = new ZulipProvider(config, urlExtractor);
                 if (zulipProvider.isConfigured()) {
                     providers.add(zulipProvider);
                 }
@@ -133,7 +140,7 @@ public class ActivityReportCommand implements Runnable {
             for (ActivityProvider provider : providers) {
                 Log.infof("Fetching from %s...", provider.getName());
                 try {
-                    List<Activity> activities = provider.fetchActivities(startDate, endDate);
+                    List<Activity> activities = provider.fetchActivities(startDate, endDate, urlExtractor);
                     allActivities.addAll(activities);
                     Log.infof("  Found %d activities", activities.size());
                 } catch (Exception e) {
@@ -143,6 +150,15 @@ public class ActivityReportCommand implements Runnable {
             }
 
             Log.infof("\nTotal activities found: %d", allActivities.size());
+
+            // Dump activities to JSON for debugging
+            if (!allActivities.isEmpty()) {
+                try {
+                    dumpActivitiesToJson(allActivities, startDate, endDate);
+                } catch (Exception e) {
+                    Log.warnf("Failed to dump activities to JSON: %s", e.getMessage());
+                }
+            }
 
             if (allActivities.isEmpty()) {
                 StringBuilder emptyReport = new StringBuilder();
@@ -235,18 +251,46 @@ public class ActivityReportCommand implements Runnable {
     }
 
     /**
+     * Get the base output directory using XDG standards.
+     */
+    private Path getOutputDirectory() {
+        String xdgDataHome = System.getenv("XDG_DATA_HOME");
+        if (xdgDataHome != null && !xdgDataHome.isEmpty()) {
+            return Path.of(xdgDataHome, "activity-report");
+        } else {
+            return Path.of(System.getProperty("user.home"), ".local", "share", "activity-report");
+        }
+    }
+
+    /**
+     * Dump activities to JSON file in dumps/ subdirectory for debugging.
+     */
+    private void dumpActivitiesToJson(List<Activity> activities, Instant startDate, Instant endDate) throws IOException {
+        Path dataDir = getOutputDirectory().resolve("dumps");
+
+        // Create directory if it doesn't exist
+        Files.createDirectories(dataDir);
+
+        // Generate filename based on date range
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault());
+        String filename = String.format("activities_%s_to_%s.json",
+            formatter.format(startDate),
+            formatter.format(endDate));
+
+        Path outputPath = dataDir.resolve(filename);
+
+        // Serialize activities to JSON using injected ObjectMapper
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(outputPath.toFile(), activities);
+
+        Log.infof("Activities dumped to: %s", outputPath);
+    }
+
+    /**
      * Write report to file in XDG_DATA_HOME directory.
      * Uses a temporary file and only moves to final location on success.
      */
     private Path writeReportToFile(String report, Instant startDate, Instant endDate) throws IOException {
-        // Determine output directory using XDG standards
-        String xdgDataHome = System.getenv("XDG_DATA_HOME");
-        Path dataDir;
-        if (xdgDataHome != null && !xdgDataHome.isEmpty()) {
-            dataDir = Path.of(xdgDataHome, "activity-report");
-        } else {
-            dataDir = Path.of(System.getProperty("user.home"), ".local", "share", "activity-report");
-        }
+        Path dataDir = getOutputDirectory();
 
         // Create directory if it doesn't exist
         Files.createDirectories(dataDir);

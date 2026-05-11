@@ -110,15 +110,21 @@ public class MarkdownReportGenerator {
 
         // Add secondary activities as sub-items
         if (!group.secondary().isEmpty()) {
+            report.append(" (see also ");
+            boolean first = true;
             for (Activity secondary : group.secondary()) {
-                report.append("  - ");
+                if (first) {
+                    first = false;
+                } else {
+                    report.append(", ");
+                }
                 if (secondary.url() != null && !secondary.url().isEmpty()) {
                     report.append(String.format("[%s](%s)", secondary.title(), secondary.url()));
                 } else {
                     report.append(secondary.title());
                 }
-                report.append("\n");
             }
+            report.append(")");
         }
 
         report.append("\n");
