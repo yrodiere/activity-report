@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$SCRIPT_DIR/../activity-report"
+PROJECT_DIR="$SCRIPT_DIR/.."
 QUARKUS_APP="$PROJECT_DIR/target/quarkus-app"
 
 # Build if necessary (first run or if source is newer than jar)
