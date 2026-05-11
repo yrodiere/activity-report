@@ -161,9 +161,17 @@ public class JiraProvider implements ActivityProvider {
                         }
                     }
 
-                    // Extract pull request URLs from rendered description
+                    // Extract pull request URLs from summary and rendered description
                     Set<String> externalUrls = new java.util.LinkedHashSet<>();
-                    extractExternalUrls(issue, externalUrls, urlExtractor);
+                    urlExtractor.extractExternalUrls(summary, externalUrls);
+
+                    // Extract from description
+                    var renderedFields = issue.get("renderedFields");
+                    if (renderedFields != null && renderedFields.get("description") != null) {
+                        String description = renderedFields.get("description").asText();
+                        urlExtractor.extractExternalUrls(description, externalUrls);
+                    }
+
                     contentUrls.addAll(externalUrls);
                     boolean hasPrUrls = !externalUrls.isEmpty();
 
@@ -202,22 +210,5 @@ public class JiraProvider implements ActivityProvider {
         Log.infof("Found %d activities from JIRA instance: %s", activities.size(), instance.name);
 
         return activities;
-    }
-
-    /**
-     * Extract external URLs (GitHub PRs, GitLab MRs) from JIRA issue.
-     * Uses shared UrlExtractor for consistency with other providers.
-     */
-    private void extractExternalUrls(JsonNode issue, Set<String> urls, UrlExtractor urlExtractor) {
-        try {
-            // Check rendered fields for external links in description
-            var renderedFields = issue.get("renderedFields");
-            if (renderedFields != null && renderedFields.get("description") != null) {
-                String description = renderedFields.get("description").asText();
-                urlExtractor.extractExternalUrls(description, urls);
-            }
-        } catch (Exception e) {
-            Log.tracef("Failed to extract external URLs from JIRA issue: %s", e.getMessage());
-        }
     }
 }

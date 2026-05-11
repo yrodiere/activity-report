@@ -247,15 +247,6 @@ public class GitHubProvider implements ActivityProvider {
     }
 
     /**
-     * Extract external URLs from a body text and add it to the set.
-     */
-    private void extractFromBody(String body, Set<String> externalUrls, UrlExtractor urlExtractor) {
-        if (body != null) {
-            urlExtractor.extractExternalUrls(body, externalUrls);
-        }
-    }
-
-    /**
      * Add comment URLs within date range to contentUrls and extract external URLs from comment bodies.
      */
     private void extractFromComments(Iterable<GHIssueComment> comments, List<String> contentUrls,
@@ -265,7 +256,10 @@ public class GitHubProvider implements ActivityProvider {
             Instant commentDate = comment.getCreatedAt().toInstant();
             if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
                 contentUrls.add(comment.getHtmlUrl().toString());
-                extractFromBody(comment.getBody(), externalUrls, urlExtractor);
+                String body = comment.getBody();
+                if (body != null) {
+                    urlExtractor.extractExternalUrls(body, externalUrls);
+                }
             }
         }
     }
@@ -478,8 +472,17 @@ public class GitHubProvider implements ActivityProvider {
                 List<String> contentUrls = new ArrayList<>();
                 Set<String> externalUrls = new LinkedHashSet<>();
 
+                // Extract external URLs from title
+                String title = issue.getTitle();
+                if (title != null) {
+                    urlExtractor.extractExternalUrls(title, externalUrls);
+                }
+
                 // Extract external URLs from body
-                extractFromBody(issue.getBody(), externalUrls, urlExtractor);
+                String body = issue.getBody();
+                if (body != null) {
+                    urlExtractor.extractExternalUrls(body, externalUrls);
+                }
 
                 // Add comment links and extract external URLs from comments
                 extractFromComments(issue.getComments(), contentUrls, externalUrls, startDate, endDate, urlExtractor);
@@ -491,7 +494,10 @@ public class GitHubProvider implements ActivityProvider {
                         Instant reviewDate = review.getSubmittedAt().toInstant();
                         if (!reviewDate.isBefore(startDate) && !reviewDate.isAfter(endDate)) {
                             contentUrls.add(review.getHtmlUrl().toString());
-                            extractFromBody(review.getBody(), externalUrls, urlExtractor);
+                            String reviewBody = review.getBody();
+                            if (reviewBody != null) {
+                                urlExtractor.extractExternalUrls(reviewBody, externalUrls);
+                            }
                         }
                     }
 
@@ -500,7 +506,10 @@ public class GitHubProvider implements ActivityProvider {
                         Instant commentDate = reviewComment.getCreatedAt().toInstant();
                         if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
                             contentUrls.add(reviewComment.getHtmlUrl().toString());
-                            extractFromBody(reviewComment.getBody(), externalUrls, urlExtractor);
+                            String commentBody = reviewComment.getBody();
+                            if (commentBody != null) {
+                                urlExtractor.extractExternalUrls(commentBody, externalUrls);
+                            }
                         }
                     }
 
