@@ -133,15 +133,6 @@ public class ZulipProvider implements ActivityProvider {
 
         for (TopicMessages topic : topicMap.values()) {
             try {
-                // Collect message URLs and extract PR URLs from message content
-                List<String> contentUrls = new ArrayList<>();
-
-                // Add individual message URLs
-                for (int messageId : topic.messageIds) {
-                    String messageUrl = buildMessageUrl(instance.url, topic.streamName, topic.subject, messageId);
-                    contentUrls.add(messageUrl);
-                }
-
                 // Extract external URLs (GitHub PRs, GitLab MRs, JIRA issues) from message content
                 Set<String> externalUrls = new LinkedHashSet<>();
                 for (String messageContent : topic.messageContents) {
@@ -151,7 +142,7 @@ public class ZulipProvider implements ActivityProvider {
                 // Also extract from topic subject
                 urlExtractor.extractExternalUrls(topic.subject, externalUrls);
 
-                contentUrls.addAll(externalUrls);
+                List<String> contentUrls = new ArrayList<>(externalUrls);
 
                 if (!externalUrls.isEmpty()) {
                     Log.tracef("Extracted %d external URLs from Zulip topic %s/%s",

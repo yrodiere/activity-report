@@ -247,15 +247,14 @@ public class GitHubProvider implements ActivityProvider {
     }
 
     /**
-     * Add comment URLs within date range to contentUrls and extract external URLs from comment bodies.
+     * Extract external URLs from comment bodies (but don't add individual comment URLs to contentUrls).
      */
-    private void extractFromComments(Iterable<GHIssueComment> comments, List<String> contentUrls,
+    private void extractFromComments(Iterable<GHIssueComment> comments,
                                      Set<String> externalUrls, Instant startDate, Instant endDate,
                                      UrlExtractor urlExtractor) throws IOException {
         for (GHIssueComment comment : comments) {
             Instant commentDate = comment.getCreatedAt().toInstant();
             if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
-                contentUrls.add(comment.getHtmlUrl().toString());
                 String body = comment.getBody();
                 if (body != null) {
                     urlExtractor.extractExternalUrls(body, externalUrls);
@@ -512,16 +511,15 @@ public class GitHubProvider implements ActivityProvider {
                 // Extract #1234 references from title and body (GitHub-instance specific)
                 extractHashReferences(ref.repoFullName, title, body, contentUrls);
 
-                // Add comment links and extract external URLs from comments
-                extractFromComments(issue.getComments(), contentUrls, externalUrls, startDate, endDate, urlExtractor);
+                // Extract external URLs from comments
+                extractFromComments(issue.getComments(), externalUrls, startDate, endDate, urlExtractor);
 
                 // For PRs, also extract from reviews and review comments
                 if (type == IssueType.PULL_REQUEST) {
-                    // Add review links and extract external URLs from review bodies
+                    // Extract external URLs from review bodies
                     for (GHPullRequestReview review : pr.listReviews()) {
                         Instant reviewDate = review.getSubmittedAt().toInstant();
                         if (!reviewDate.isBefore(startDate) && !reviewDate.isAfter(endDate)) {
-                            contentUrls.add(review.getHtmlUrl().toString());
                             String reviewBody = review.getBody();
                             if (reviewBody != null) {
                                 urlExtractor.extractExternalUrls(reviewBody, externalUrls);
@@ -529,19 +527,16 @@ public class GitHubProvider implements ActivityProvider {
                         }
                     }
 
-                    // Add review comment links and extract external URLs
+                    // Extract external URLs from review comments
                     for (GHPullRequestReviewComment reviewComment : pr.listReviewComments()) {
                         Instant commentDate = reviewComment.getCreatedAt().toInstant();
                         if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
-                            contentUrls.add(reviewComment.getHtmlUrl().toString());
                             String commentBody = reviewComment.getBody();
                             if (commentBody != null) {
                                 urlExtractor.extractExternalUrls(commentBody, externalUrls);
                             }
                         }
                     }
-
-                    Log.tracef("  PR %s#%d: found %d total content URLs in date range", ref.repoFullName, ref.number, contentUrls.size());
                 }
 
                 // Add extracted external URLs to contentUrls
