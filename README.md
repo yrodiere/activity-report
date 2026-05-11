@@ -28,7 +28,7 @@ UNTESTED:
 2. **Add to PATH** (recommended):
    ```bash
    # Add this to your ~/.bashrc or ~/.zshrc
-   export PATH="$PATH:/path/to/productivity/bin"
+   export PATH="$PATH:/path/to/activity-report/bin"
    ```
 
    Then reload your shell or run:
@@ -49,7 +49,7 @@ The tool follows the XDG Base Directory Specification for configuration files. C
 
 2. **Copy the example configuration**:
    ```bash
-   cp /path/to/productivity/activity-report/config.yaml.example ~/.config/activity-report/config.yaml
+   cp /path/to/activity-report/config.yaml.example ~/.config/activity-report/config.yaml
    ```
 
 3. **Edit the configuration** and add your credentials:
