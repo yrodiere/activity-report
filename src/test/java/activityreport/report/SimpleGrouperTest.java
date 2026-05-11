@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class SimpleGrouperTest {
 
@@ -38,11 +38,10 @@ class SimpleGrouperTest {
 
         List<ActivityGroup> groups = SimpleGrouper.groupActivities(List.of(pr, review));
 
-        long groupsWithSecondary = groups.stream()
-            .filter(g -> !g.secondary().isEmpty())
-            .count();
-
-        assertEquals(1, groupsWithSecondary, "Expected 1 group when contentUrls reference parent");
+        assertThat(groups)
+            .filteredOn(g -> !g.secondary().isEmpty())
+            .as("Expected 1 group when contentUrls reference parent")
+            .hasSize(1);
     }
 
     @Test
@@ -77,12 +76,11 @@ class SimpleGrouperTest {
 
         List<ActivityGroup> groups = SimpleGrouper.groupActivities(List.of(pr, jiraIssue));
 
-        long groupsWithSecondary = groups.stream()
-            .filter(g -> !g.secondary().isEmpty())
-            .count();
-
         // This DOES group because JIRA's contentUrls include the PR's main URL
-        assertEquals(1, groupsWithSecondary, "Should group when JIRA contentUrls reference the GitHub PR");
+        assertThat(groups)
+            .filteredOn(g -> !g.secondary().isEmpty())
+            .as("Should group when JIRA contentUrls reference the GitHub PR")
+            .hasSize(1);
     }
 
     @Test
@@ -117,13 +115,11 @@ class SimpleGrouperTest {
 
         List<ActivityGroup> groups = SimpleGrouper.groupActivities(List.of(pr, jiraIssue));
 
-        long groupsWithSecondary = groups.stream()
-            .filter(g -> !g.secondary().isEmpty())
-            .count();
-
         // No grouping: URLs don't overlap (different comment IDs)
-        assertEquals(0, groupsWithSecondary,
-            "No grouping when URLs are related but don't exactly match");
+        assertThat(groups)
+            .filteredOn(g -> !g.secondary().isEmpty())
+            .as("No grouping when URLs are related but don't exactly match")
+            .isEmpty();
     }
 
     @Test
@@ -151,7 +147,7 @@ class SimpleGrouperTest {
 
         List<ActivityGroup> groups = SimpleGrouper.groupActivities(List.of(pr, issue));
 
-        assertEquals(2, groups.size());
-        assertTrue(groups.stream().allMatch(g -> g.secondary().isEmpty()));
+        assertThat(groups).hasSize(2)
+            .allMatch(g -> g.secondary().isEmpty());
     }
 }

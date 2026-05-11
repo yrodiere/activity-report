@@ -6,7 +6,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class UrlExtractorTest {
 
@@ -19,9 +19,9 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(2, urls.size());
-        assertTrue(urls.contains("https://github.com/owner/repo/pull/123"));
-        assertTrue(urls.contains("https://github.com/other/proj/pull/456"));
+        assertThat(urls).containsExactlyInAnyOrder(
+            "https://github.com/owner/repo/pull/123",
+            "https://github.com/other/proj/pull/456");
     }
 
     @Test
@@ -33,8 +33,7 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(1, urls.size());
-        assertTrue(urls.contains("https://github.company.com/team/project/pull/789"));
+        assertThat(urls).containsExactly("https://github.company.com/team/project/pull/789");
     }
 
     @Test
@@ -46,8 +45,7 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(1, urls.size());
-        assertTrue(urls.contains("https://github.com/owner/repo/pull/123"));
+        assertThat(urls).containsExactly("https://github.com/owner/repo/pull/123");
     }
 
     @Test
@@ -59,8 +57,7 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(1, urls.size());
-        assertTrue(urls.contains("https://gitlab.com/owner/repo/-/merge_requests/123"));
+        assertThat(urls).containsExactly("https://gitlab.com/owner/repo/-/merge_requests/123");
     }
 
     @Test
@@ -72,8 +69,7 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(1, urls.size());
-        assertTrue(urls.contains("https://gitlab.company.com/team/project/-/merge_requests/456"));
+        assertThat(urls).containsExactly("https://gitlab.company.com/team/project/-/merge_requests/456");
     }
 
     @Test
@@ -86,9 +82,9 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(2, urls.size());
-        assertTrue(urls.contains("https://jira.example.com/browse/PROJ-123"));
-        assertTrue(urls.contains("https://issues.corp.com/browse/BUG-456"));
+        assertThat(urls).containsExactlyInAnyOrder(
+            "https://jira.example.com/browse/PROJ-123",
+            "https://issues.corp.com/browse/BUG-456");
     }
 
     @Test
@@ -100,9 +96,9 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(2, urls.size());
-        assertTrue(urls.contains("https://jira.example.com/browse/PROJ-123"));
-        assertTrue(urls.contains("https://jira.example.com/browse/PROJ-456"));
+        assertThat(urls).containsExactlyInAnyOrder(
+            "https://jira.example.com/browse/PROJ-123",
+            "https://jira.example.com/browse/PROJ-456");
     }
 
     @Test
@@ -115,9 +111,8 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(1, urls.size());
-        assertTrue(urls.contains("https://jira.example.com/browse/PROJ-123"));
-        assertFalse(urls.contains("https://jira.example.com/browse/LICENSE-2"));
+        assertThat(urls).containsExactly("https://jira.example.com/browse/PROJ-123")
+            .doesNotContain("https://jira.example.com/browse/LICENSE-2");
     }
 
     @Test
@@ -133,11 +128,11 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(4, urls.size());
-        assertTrue(urls.contains("https://jira.example.com/browse/PROJ-123"));
-        assertTrue(urls.contains("https://github.com/owner/repo/pull/456"));
-        assertTrue(urls.contains("https://gitlab.com/other/repo/-/merge_requests/789"));
-        assertTrue(urls.contains("https://jira.example.com/browse/BUG-999"));
+        assertThat(urls).containsExactlyInAnyOrder(
+            "https://jira.example.com/browse/PROJ-123",
+            "https://github.com/owner/repo/pull/456",
+            "https://gitlab.com/other/repo/-/merge_requests/789",
+            "https://jira.example.com/browse/BUG-999");
     }
 
     @Test
@@ -147,10 +142,10 @@ class UrlExtractorTest {
 
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(null, urls);
-        assertEquals(0, urls.size());
+        assertThat(urls).isEmpty();
 
         extractor.extractExternalUrls("", urls);
-        assertEquals(0, urls.size());
+        assertThat(urls).isEmpty();
     }
 
     @Test
@@ -163,8 +158,8 @@ class UrlExtractorTest {
         Set<String> urls = new HashSet<>();
         extractor.extractExternalUrls(text, urls);
 
-        assertEquals(2, urls.size());
-        assertTrue(urls.contains("https://github.com/public/repo/pull/1"));
-        assertTrue(urls.contains("https://github.company.com/private/repo/pull/2"));
+        assertThat(urls).containsExactlyInAnyOrder(
+            "https://github.com/public/repo/pull/1",
+            "https://github.company.com/private/repo/pull/2");
     }
 }
