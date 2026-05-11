@@ -17,7 +17,8 @@ public class MarkdownReportGenerator {
         Map<String, List<ActivityGroup>> byProject = new LinkedHashMap<>();
         byProject.put("General", new ArrayList<>()); // Always empty, manually filled
 
-        List<ActivityGroup> miscGroups = new ArrayList<>();
+        List<ActivityGroup> reviewGroups = new ArrayList<>();
+        List<ActivityGroup> triageDiscussGroups = new ArrayList<>();
         List<ActivityGroup> choreGroups = new ArrayList<>();
 
         for (ActivityGroup group : groups) {
@@ -26,15 +27,16 @@ public class MarkdownReportGenerator {
             String project = primary.project();
 
             // CODE activities go to project sections (or "Unclassified" if no project)
-            // CHORE activities go to choreGroups
-            // Other activities go to miscGroups
             if (actionCategory == ActionCategory.CODE) {
                 String projectKey = (project != null && !project.isEmpty()) ? project : "Unclassified";
                 byProject.computeIfAbsent(projectKey, k -> new ArrayList<>()).add(group);
             } else if (actionCategory == ActionCategory.CHORE) {
                 choreGroups.add(group);
+            } else if (actionCategory == ActionCategory.REVIEW) {
+                reviewGroups.add(group);
             } else {
-                miscGroups.add(group);
+                // DISCUSS and others
+                triageDiscussGroups.add(group);
             }
         }
 
@@ -64,13 +66,20 @@ public class MarkdownReportGenerator {
             report.append("\n----\n");
         }
 
-        // Generate Misc section (reviews, discussions, chores)
-        if (!miscGroups.isEmpty() || !choreGroups.isEmpty()) {
+        // Generate Misc section (reviews, triage/discussions, chores)
+        if (!reviewGroups.isEmpty() || !triageDiscussGroups.isEmpty() || !choreGroups.isEmpty()) {
             report.append("\n# Misc\n");
 
-            if (!miscGroups.isEmpty()) {
-                report.append("\nReviews, triage, discussions\n\n");
-                for (ActivityGroup group : miscGroups) {
+            if (!reviewGroups.isEmpty()) {
+                report.append("\nReviews\n\n");
+                for (ActivityGroup group : reviewGroups) {
+                    formatGroup(report, group);
+                }
+            }
+
+            if (!triageDiscussGroups.isEmpty()) {
+                report.append("\nTriage, discussions\n\n");
+                for (ActivityGroup group : triageDiscussGroups) {
                     formatGroup(report, group);
                 }
             }

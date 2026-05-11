@@ -116,8 +116,7 @@ public class JiraProvider implements ActivityProvider {
                     String status = issue.get("fields").get("status").get("name").asText();
                     String issueUrl = instance.url + "/browse/" + key;
 
-                    // Collect content URLs from user's actions in the time period
-                    List<String> contentUrls = new ArrayList<>();
+                    // Track user's latest activity in the time period
                     Instant latestUserActivity = null;
 
                     // Parse changelog to find user's actions during the time period
@@ -141,28 +140,12 @@ public class JiraProvider implements ActivityProvider {
                                     if (latestUserActivity == null || changeDate.isAfter(latestUserActivity)) {
                                         latestUserActivity = changeDate;
                                     }
-
-                                    // Check if this history entry contains a comment
-                                    var items = history.get("items");
-                                    if (items != null && items.isArray()) {
-                                        for (JsonNode item : items) {
-                                            String field = item.get("field").asText();
-                                            if ("comment".equals(field)) {
-                                                // Comment was added - extract comment ID
-                                                String commentId = item.get("to").asText();
-                                                if (commentId != null && !commentId.isEmpty()) {
-                                                    String commentUrl = instance.url + "/browse/" + key + "?focusedCommentId=" + commentId + "#comment-" + commentId;
-                                                    contentUrls.add(commentUrl);
-                                                }
-                                            }
-                                        }
-                                    }
                                 }
                             }
                         }
                     }
 
-                    // Extract pull request URLs from summary and rendered description
+                    // Extract external URLs from summary and rendered description
                     Set<String> externalUrls = new java.util.LinkedHashSet<>();
                     urlExtractor.extractExternalUrls(summary, externalUrls);
 
@@ -173,7 +156,7 @@ public class JiraProvider implements ActivityProvider {
                         urlExtractor.extractExternalUrls(description, externalUrls);
                     }
 
-                    contentUrls.addAll(externalUrls);
+                    List<String> contentUrls = new ArrayList<>(externalUrls);
                     boolean hasPrUrls = !externalUrls.isEmpty();
 
                     // Only create activity if user had activity during the time period
