@@ -6,36 +6,26 @@ A command-line tool that generates intelligent activity reports from multiple so
 
 - **Multiple Data Sources**: Fetch activities from GitHub, GitHub Enterprise, JIRA, and Zulip
 - **Multi-Instance Support**: Connect to multiple instances of each provider
-- **AI-Powered Enrichment**: Uses local AI (via Podman AI Lab) to add descriptions and assign projects to activities
 - **Smart Activity Grouping**: Intelligently groups related activities (issues, PRs, commits) based on shared URLs and context
 - **Project Classification**: Automatically organizes activities into project sections
 - **Flexible Date Ranges**: Query activities for the last N days or specify custom date ranges
 - **Markdown Output**: Generate professional markdown reports suitable for status updates, performance reviews, or team reports
+
+UNTESTED:
+
+- **AI-Powered Enrichment**: Uses local AI (via Podman AI Lab) to add descriptions and assign projects to activities
 - **Fallback Mode**: Works without AI using simple URL-based grouping
 
 ## Prerequisites
 
 - **Java 21+**: Required to run the application
-- **JBang**: For easy execution (install from https://www.jbang.dev)
 - **Podman AI Lab** (optional): For AI-powered enrichment and grouping (https://podman-desktop.io/extensions/ai-lab)
 
 ## Installation
 
-1. **Install JBang** (if not already installed):
-   ```bash
-   # macOS
-   brew install jbangdev/tap/jbang
+1. **Clone or download** this repository
 
-   # Linux
-   curl -Ls https://sh.jbang.dev | bash -s - app setup
-
-   # Windows
-   # See https://www.jbang.dev/download/
-   ```
-
-2. **Clone or download** this repository
-
-3. **Add to PATH** (recommended):
+2. **Add to PATH** (recommended):
    ```bash
    # Add this to your ~/.bashrc or ~/.zshrc
    export PATH="$PATH:/path/to/productivity/bin"
