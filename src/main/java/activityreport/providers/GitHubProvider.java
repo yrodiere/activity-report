@@ -153,8 +153,8 @@ public class GitHubProvider implements ActivityProvider {
 
                 // Step 2: Fetch full details for each unique issue/PR
                 int beforeCount = allActivities.size();
-                allActivities.addAll(fetchIssueDetails(instanceInfo, issueRefs, startDate, endDate, urlExtractor));
-                allActivities.addAll(fetchPullRequestDetails(instanceInfo, currentLogin, prRefs, startDate, endDate, urlExtractor));
+                allActivities.addAll(fetchIssueOrPRDetails(IssueType.ISSUE, instanceInfo, currentLogin, issueRefs, startDate, endDate, urlExtractor));
+                allActivities.addAll(fetchIssueOrPRDetails(IssueType.PULL_REQUEST, instanceInfo, currentLogin, prRefs, startDate, endDate, urlExtractor));
                 int foundCount = allActivities.size() - beforeCount;
 
                 Log.infof("Found %d activities from GitHub instance: %s", foundCount, instanceName);
@@ -234,6 +234,17 @@ public class GitHubProvider implements ActivityProvider {
     private record IssueRef(String repoFullName, int number) {}
 
     private record IssueRefWithClient(IssueRef ref, Instant timestamp, GitHub client) {}
+
+    private enum IssueType {
+        ISSUE("issue"),
+        PULL_REQUEST("pull_request");
+
+        final String actionName;
+
+        IssueType(String actionName) {
+            this.actionName = actionName;
+        }
+    }
 
     /**
      * Extract external URLs from a body text and add it to the set.
@@ -405,46 +416,113 @@ public class GitHubProvider implements ActivityProvider {
         }
     }
 
-    private List<Activity> fetchIssueDetails(InstanceInfo instanceInfo, Map<IssueRef, IssueRefWithClient> issueRefs, Instant startDate, Instant endDate, UrlExtractor urlExtractor) {
+    /**
+     * Fetch details for issues or pull requests.
+     * Unified method to avoid code duplication between issues and PRs.
+     */
+    private List<Activity> fetchIssueOrPRDetails(IssueType type, InstanceInfo instanceInfo, String currentLogin,
+                                                 Map<IssueRef, IssueRefWithClient> refs, Instant startDate,
+                                                 Instant endDate, UrlExtractor urlExtractor) {
         List<Activity> activities = new ArrayList<>();
         String source = "GitHub - " + instanceInfo.name;
 
-        for (IssueRefWithClient refWithClient : issueRefs.values()) {
+        for (IssueRefWithClient refWithClient : refs.values()) {
             IssueRef ref = refWithClient.ref;
             Instant eventTimestamp = refWithClient.timestamp;
             GitHub github = refWithClient.client;
             try {
+                if (type == IssueType.PULL_REQUEST) {
+                    Log.tracef("Fetching PR details: %s#%d", ref.repoFullName, ref.number);
+                }
+
                 GHRepository repo = github.getRepository(ref.repoFullName);
-                GHIssue issue = repo.getIssue(ref.number);
+
+                // Fetch issue or PR (GHPullRequest extends GHIssue)
+                GHIssue issue;
+                GHPullRequest pr = null;
+                if (type == IssueType.PULL_REQUEST) {
+                    pr = repo.getPullRequest(ref.number);
+                    issue = pr; // GHPullRequest IS-A GHIssue
+                    Log.tracef("  PR %s#%d: eventTimestamp=%s", ref.repoFullName, ref.number, eventTimestamp);
+                } else {
+                    issue = repo.getIssue(ref.number);
+                }
+
+                // Determine action category
+                ActionCategory actionCategory;
+                if (type == IssueType.PULL_REQUEST) {
+                    GHPullRequest finalPr = pr; // Capture for lambda
+                    actionCategory = instanceInfo.categoryFilters.matchPullRequest(finalPr)
+                        .orElseGet(() -> {
+                            try {
+                                boolean isAuthor = finalPr.getUser().getLogin().equals(currentLogin);
+                                return isAuthor ? ActionCategory.CODE : ActionCategory.REVIEW;
+                            } catch (Exception e) {
+                                Log.tracef("Failed to determine PR author for %s#%d, defaulting to review: %s",
+                                    ref.repoFullName, ref.number, e.getMessage());
+                                return ActionCategory.REVIEW;
+                            }
+                        });
+                    if (instanceInfo.categoryFilters.matchPullRequest(finalPr).isPresent()) {
+                        Log.tracef("  PR %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
+                    }
+                } else {
+                    actionCategory = instanceInfo.categoryFilters.matchIssue(issue)
+                        .orElse(ActionCategory.DISCUSS);
+                    if (actionCategory != ActionCategory.DISCUSS) {
+                        Log.tracef("  Issue %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
+                    }
+                }
 
                 // Collect all relevant links within date range
                 List<String> contentUrls = new ArrayList<>();
                 Set<String> externalUrls = new LinkedHashSet<>();
 
-                // Extract external URLs from issue body
+                // Extract external URLs from body
                 extractFromBody(issue.getBody(), externalUrls, urlExtractor);
 
                 // Add comment links and extract external URLs from comments
                 extractFromComments(issue.getComments(), contentUrls, externalUrls, startDate, endDate, urlExtractor);
 
+                // For PRs, also extract from reviews and review comments
+                if (type == IssueType.PULL_REQUEST) {
+                    // Add review links and extract external URLs from review bodies
+                    for (GHPullRequestReview review : pr.listReviews()) {
+                        Instant reviewDate = review.getSubmittedAt().toInstant();
+                        if (!reviewDate.isBefore(startDate) && !reviewDate.isAfter(endDate)) {
+                            contentUrls.add(review.getHtmlUrl().toString());
+                            extractFromBody(review.getBody(), externalUrls, urlExtractor);
+                        }
+                    }
+
+                    // Add review comment links and extract external URLs
+                    for (GHPullRequestReviewComment reviewComment : pr.listReviewComments()) {
+                        Instant commentDate = reviewComment.getCreatedAt().toInstant();
+                        if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
+                            contentUrls.add(reviewComment.getHtmlUrl().toString());
+                            extractFromBody(reviewComment.getBody(), externalUrls, urlExtractor);
+                        }
+                    }
+
+                    Log.tracef("  PR %s#%d: found %d total content URLs in date range", ref.repoFullName, ref.number, contentUrls.size());
+                }
+
                 // Add extracted external URLs to contentUrls
                 contentUrls.addAll(externalUrls);
 
                 if (!externalUrls.isEmpty()) {
-                    Log.tracef("  Issue %s#%d: Extracted %d external URLs", ref.repoFullName, ref.number, externalUrls.size());
+                    String typeStr = type == IssueType.PULL_REQUEST ? "PR" : "Issue";
+                    Log.tracef("  %s %s#%d: Extracted %d external URLs", typeStr, ref.repoFullName, ref.number, externalUrls.size());
                 }
 
-                // Determine action category: check filters first, otherwise DISCUSS
-                ActionCategory actionCategory = instanceInfo.categoryFilters.matchIssue(issue)
-                    .orElse(ActionCategory.DISCUSS);
-                if (actionCategory != ActionCategory.DISCUSS) {
-                    Log.tracef("  Issue %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
+                // Create activity - use event timestamp that discovered this issue/PR
+                if (type == IssueType.PULL_REQUEST) {
+                    Log.tracef("  PR %s#%d: Creating activity (contentUrls=%d)", ref.repoFullName, ref.number, contentUrls.size());
                 }
 
-                // Create activity - use event timestamp that discovered this issue
                 Activity activity = new Activity(
                     source,
-                    "issue",
+                    type.actionName,
                     actionCategory,
                     ref.repoFullName + "#" + ref.number + ": " + issue.getTitle(),
                     "", // description
@@ -460,111 +538,8 @@ public class GitHubProvider implements ActivityProvider {
 
                 activities.add(activity);
             } catch (Exception e) {
-                Log.tracef("Failed to fetch issue %s#%d: %s", ref.repoFullName, ref.number, e.getMessage());
-            }
-        }
-
-        return activities;
-    }
-
-    private List<Activity> fetchPullRequestDetails(InstanceInfo instanceInfo, String currentLogin, Map<IssueRef, IssueRefWithClient> prRefs, Instant startDate, Instant endDate, UrlExtractor urlExtractor) {
-        List<Activity> activities = new ArrayList<>();
-        String source = "GitHub - " + instanceInfo.name;
-
-        for (IssueRefWithClient refWithClient : prRefs.values()) {
-            IssueRef ref = refWithClient.ref;
-            Instant eventTimestamp = refWithClient.timestamp;
-            GitHub github = refWithClient.client;
-            try {
-                Log.tracef("Fetching PR details: %s#%d", ref.repoFullName, ref.number);
-                GHRepository repo = github.getRepository(ref.repoFullName);
-                GHPullRequest pr = repo.getPullRequest(ref.number);
-
-                Log.tracef("  PR %s#%d: eventTimestamp=%s", ref.repoFullName, ref.number, eventTimestamp);
-
-                // Determine action category: check filters first, then based on PR authorship
-                ActionCategory actionCategory = instanceInfo.categoryFilters.matchPullRequest(pr)
-                    .orElseGet(() -> {
-                        try {
-                            boolean isAuthor = pr.getUser().getLogin().equals(currentLogin);
-                            return isAuthor ? ActionCategory.CODE : ActionCategory.REVIEW;
-                        } catch (Exception e) {
-                            Log.tracef("Failed to determine PR author for %s#%d, defaulting to review: %s", ref.repoFullName, ref.number, e.getMessage());
-                            return ActionCategory.REVIEW;
-                        }
-                    });
-                if (instanceInfo.categoryFilters.matchPullRequest(pr).isPresent()) {
-                    Log.tracef("  PR %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
-                }
-
-                // Collect all relevant links within date range
-                List<String> contentUrls = new ArrayList<>();
-                Set<String> externalUrls = new LinkedHashSet<>();
-
-                // Extract external URLs from PR body
-                extractFromBody(pr.getBody(), externalUrls, urlExtractor);
-
-                // Add comment links and extract external URLs from comments
-                extractFromComments(pr.getComments(), contentUrls, externalUrls, startDate, endDate, urlExtractor);
-
-                // Add review links and extract external URLs from review bodies
-                for (GHPullRequestReview review : pr.listReviews()) {
-                    Instant reviewDate = review.getSubmittedAt().toInstant();
-                    if (!reviewDate.isBefore(startDate) && !reviewDate.isAfter(endDate)) {
-                        contentUrls.add(review.getHtmlUrl().toString());
-
-                        // Extract external URLs from review body
-                        String reviewBody = review.getBody();
-                        if (reviewBody != null) {
-                            urlExtractor.extractExternalUrls(reviewBody, externalUrls);
-                        }
-                    }
-                }
-
-                // Add review comment links and extract external URLs
-                for (GHPullRequestReviewComment reviewComment : pr.listReviewComments()) {
-                    Instant commentDate = reviewComment.getCreatedAt().toInstant();
-                    if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
-                        contentUrls.add(reviewComment.getHtmlUrl().toString());
-
-                        // Extract external URLs from review comment body
-                        String commentBody = reviewComment.getBody();
-                        if (commentBody != null) {
-                            urlExtractor.extractExternalUrls(commentBody, externalUrls);
-                        }
-                    }
-                }
-
-                // Add extracted external URLs to contentUrls
-                contentUrls.addAll(externalUrls);
-
-                if (!externalUrls.isEmpty()) {
-                    Log.tracef("  PR %s#%d: Extracted %d external URLs", ref.repoFullName, ref.number, externalUrls.size());
-                }
-
-                Log.tracef("  PR %s#%d: found %d total content URLs in date range", ref.repoFullName, ref.number, contentUrls.size());
-
-                // Create activity - use event timestamp that discovered this PR
-                Log.tracef("  PR %s#%d: Creating activity (contentUrls=%d)", ref.repoFullName, ref.number, contentUrls.size());
-                Activity activity = new Activity(
-                    source,
-                    "pull_request",
-                    actionCategory,
-                    ref.repoFullName + "#" + ref.number + ": " + pr.getTitle(),
-                    "", // description
-                    pr.getHtmlUrl().toString(),
-                    eventTimestamp,
-                    contentUrls
-                );
-
-                // Add default project if configured
-                if (instanceInfo.defaultProject != null) {
-                    activity.addMetadata("defaultProject", instanceInfo.defaultProject);
-                }
-
-                activities.add(activity);
-            } catch (Exception e) {
-                Log.tracef("Failed to fetch pull request %s#%d: %s", ref.repoFullName, ref.number, e.getMessage());
+                String typeStr = type == IssueType.PULL_REQUEST ? "pull request" : "issue";
+                Log.tracef("Failed to fetch %s %s#%d: %s", typeStr, ref.repoFullName, ref.number, e.getMessage());
             }
         }
 
