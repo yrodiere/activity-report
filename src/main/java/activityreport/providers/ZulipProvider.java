@@ -3,6 +3,7 @@ package activityreport.providers;
 import activityreport.client.BasicAuthRequestFilter;
 import activityreport.client.TraceClientLogger;
 import activityreport.client.ZulipRestClient;
+import activityreport.util.UrlExtractor;
 import org.jboss.resteasy.reactive.client.api.LoggingScope;
 import activityreport.config.AppConfig;
 import activityreport.model.ActionCategory;
@@ -17,7 +18,6 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Zulip Activity Provider supporting multiple instances
@@ -27,7 +27,7 @@ public class ZulipProvider implements ActivityProvider {
 
     private record ZulipInstance(String url, String email, String apiKey, String defaultProject) {}
 
-    public ZulipProvider(AppConfig config) {
+    public ZulipProvider(AppConfig config, UrlExtractor urlExtractor) {
         this.instances = new ArrayList<>();
 
         config.providers().zulip().ifPresent(zulip -> {
@@ -55,12 +55,12 @@ public class ZulipProvider implements ActivityProvider {
     }
 
     @Override
-    public List<Activity> fetchActivities(Instant startDate, Instant endDate) throws Exception {
+    public List<Activity> fetchActivities(Instant startDate, Instant endDate, UrlExtractor urlExtractor) throws Exception {
         List<Activity> allActivities = new ArrayList<>();
 
         for (ZulipInstance instance : instances) {
             try {
-                allActivities.addAll(fetchFromInstance(instance, startDate, endDate));
+                allActivities.addAll(fetchFromInstance(instance, startDate, endDate, urlExtractor));
             } catch (Exception e) {
                 Log.warnf("Error fetching from Zulip instance %s: %s", instance.url, e.getMessage());
             }
@@ -69,7 +69,7 @@ public class ZulipProvider implements ActivityProvider {
         return allActivities;
     }
 
-    private List<Activity> fetchFromInstance(ZulipInstance instance, Instant startDate, Instant endDate) throws Exception {
+    private List<Activity> fetchFromInstance(ZulipInstance instance, Instant startDate, Instant endDate, UrlExtractor urlExtractor) throws Exception {
         List<Activity> activities = new ArrayList<>();
 
         Log.infof("Fetching activities from Zulip instance: %s", instance.url);
@@ -116,12 +116,14 @@ public class ZulipProvider implements ActivityProvider {
                 String streamName = message.get("display_recipient").asText();
                 String subject = message.get("subject").asText();
                 int messageId = message.get("id").asInt();
+                String content = message.has("content") ? message.get("content").asText() : "";
 
                 TopicRef topicRef = new TopicRef(streamName, subject);
                 TopicMessages topicMessages = topicMap.computeIfAbsent(topicRef,
                     k -> new TopicMessages(streamName, subject, new ArrayList<>()));
 
                 topicMessages.messageIds.add(messageId);
+                topicMessages.messageContents.add(content);
                 topicMessages.updateTimestamp(messageTime);
             }
         }
@@ -131,11 +133,29 @@ public class ZulipProvider implements ActivityProvider {
 
         for (TopicMessages topic : topicMap.values()) {
             try {
-                // Collect message URLs
+                // Collect message URLs and extract PR URLs from message content
                 List<String> contentUrls = new ArrayList<>();
+
+                // Add individual message URLs
                 for (int messageId : topic.messageIds) {
                     String messageUrl = buildMessageUrl(instance.url, topic.streamName, topic.subject, messageId);
                     contentUrls.add(messageUrl);
+                }
+
+                // Extract external URLs (GitHub PRs, GitLab MRs, JIRA issues) from message content
+                Set<String> externalUrls = new LinkedHashSet<>();
+                for (String messageContent : topic.messageContents) {
+                    urlExtractor.extractExternalUrls(messageContent, externalUrls);
+                }
+
+                // Also extract from topic subject
+                urlExtractor.extractExternalUrls(topic.subject, externalUrls);
+
+                contentUrls.addAll(externalUrls);
+
+                if (!externalUrls.isEmpty()) {
+                    Log.tracef("Extracted %d external URLs from Zulip topic %s/%s",
+                        externalUrls.size(), topic.streamName, topic.subject);
                 }
 
                 String topicUrl = buildTopicUrl(instance.url, topic.streamName, topic.subject);
@@ -174,12 +194,14 @@ public class ZulipProvider implements ActivityProvider {
         final String streamName;
         final String subject;
         final List<Integer> messageIds;
+        final List<String> messageContents;
         Instant latestTimestamp;
 
         TopicMessages(String streamName, String subject, List<Integer> messageIds) {
             this.streamName = streamName;
             this.subject = subject;
             this.messageIds = messageIds;
+            this.messageContents = new ArrayList<>();
         }
 
         void updateTimestamp(Instant timestamp) {
@@ -210,4 +232,5 @@ public class ZulipProvider implements ActivityProvider {
             return baseUrl + "/#narrow/stream/" + streamName + "/topic/" + subject + "/near/" + messageId;
         }
     }
+
 }

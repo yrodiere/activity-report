@@ -11,6 +11,7 @@ import activityreport.report.AIProcessor;
 import activityreport.report.MarkdownReportGenerator;
 import activityreport.report.ProjectClassifier;
 import activityreport.report.SimpleGrouper;
+import activityreport.util.UrlExtractor;
 import io.quarkus.logging.Log;
 import io.quarkus.picocli.runtime.annotations.TopCommand;
 import jakarta.inject.Inject;
@@ -96,25 +97,28 @@ public class ActivityReportCommand implements Runnable {
             Log.infof("Fetching activities from %s to %s\n",
                      formatter.format(startDate), formatter.format(endDate));
 
+            // Initialize URL extractor (providers will register their patterns)
+            UrlExtractor urlExtractor = new UrlExtractor();
+
             // Initialize providers
             List<ActivityProvider> providers = new ArrayList<>();
 
             if (config.providers().github().map(g -> g.enabled()).orElse(false)) {
-                var githubProvider = new GitHubProvider(config);
+                var githubProvider = new GitHubProvider(config, urlExtractor);
                 if (githubProvider.isConfigured()) {
                     providers.add(githubProvider);
                 }
             }
 
             if (config.providers().jira().map(j -> j.enabled()).orElse(false)) {
-                var jiraProvider = new JiraProvider(config);
+                var jiraProvider = new JiraProvider(config, urlExtractor);
                 if (jiraProvider.isConfigured()) {
                     providers.add(jiraProvider);
                 }
             }
 
             if (config.providers().zulip().map(z -> z.enabled()).orElse(false)) {
-                var zulipProvider = new ZulipProvider(config);
+                var zulipProvider = new ZulipProvider(config, urlExtractor);
                 if (zulipProvider.isConfigured()) {
                     providers.add(zulipProvider);
                 }
@@ -133,7 +137,7 @@ public class ActivityReportCommand implements Runnable {
             for (ActivityProvider provider : providers) {
                 Log.infof("Fetching from %s...", provider.getName());
                 try {
-                    List<Activity> activities = provider.fetchActivities(startDate, endDate);
+                    List<Activity> activities = provider.fetchActivities(startDate, endDate, urlExtractor);
                     allActivities.addAll(activities);
                     Log.infof("  Found %d activities", activities.size());
                 } catch (Exception e) {

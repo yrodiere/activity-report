@@ -33,6 +33,8 @@ providers:
       #   default-project: "Infrastructure"
 
   # Zulip (supports multiple instances)
+  # Note: Zulip will automatically extract JIRA issue keys (e.g., PROJ-123) and resolve them
+  # against configured JIRA instances for cross-provider grouping
   zulip:
     enabled: false  # Set to true to enable
     instances:
