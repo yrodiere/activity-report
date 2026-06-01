@@ -153,9 +153,10 @@ public class GitHubProvider implements ActivityProvider {
                 Log.tracef("After processing all tokens: Found %d issues, %d PRs", issueRefs.size(), prRefs.size());
 
                 // Step 2: Fetch full details for each unique issue/PR
+                // Pass all clients for fallback - not just the ones that discovered each issue
                 int beforeCount = allActivities.size();
-                allActivities.addAll(fetchIssueOrPRDetails(IssueType.ISSUE, instanceInfo, issueRefs, startDate, endDate, urlExtractor));
-                allActivities.addAll(fetchIssueOrPRDetails(IssueType.PULL_REQUEST, instanceInfo, prRefs, startDate, endDate, urlExtractor));
+                allActivities.addAll(fetchIssueOrPRDetails(IssueType.ISSUE, instanceInfo, clients, issueRefs, startDate, endDate, urlExtractor));
+                allActivities.addAll(fetchIssueOrPRDetails(IssueType.PULL_REQUEST, instanceInfo, clients, prRefs, startDate, endDate, urlExtractor));
                 int foundCount = allActivities.size() - beforeCount;
 
                 Log.infof("Found %d activities from GitHub instance: %s", foundCount, instanceName);
@@ -432,8 +433,11 @@ public class GitHubProvider implements ActivityProvider {
     /**
      * Fetch details for issues or pull requests.
      * Unified method to avoid code duplication between issues and PRs.
+     *
+     * @param allClients All clients for this instance - used for fallback when discovering clients lack access
      */
     private List<Activity> fetchIssueOrPRDetails(IssueType type, InstanceInfo instanceInfo,
+                                                 List<GitHub> allClients,
                                                  Map<IssueRef, IssueRefWithClients> refs, Instant startDate,
                                                  Instant endDate, UrlExtractor urlExtractor) {
         List<Activity> activities = new ArrayList<>();
@@ -442,17 +446,36 @@ public class GitHubProvider implements ActivityProvider {
         for (IssueRefWithClients refWithClients : refs.values()) {
             IssueRef ref = refWithClients.ref;
             Instant eventTimestamp = refWithClients.timestamp;
-            List<GitHub> clients = refWithClients.clients;
+            List<GitHub> discoveringClients = refWithClients.clients;
 
-            // Try each client until one succeeds
+            // Try all instance clients (not just discovering ones) for maximum fallback coverage
+            // Org tokens might not allow listing user events, so they wouldn't be in discoveringClients
             boolean fetched = false;
             Exception lastException = null;
 
-            for (GitHub github : clients) {
+            // Start with discovering clients (most likely to succeed), then try others as fallback
+            List<GitHub> clientsToTry = new ArrayList<>(discoveringClients);
+            Set<GitHub> alreadyAdded = new HashSet<>(discoveringClients);
+            for (GitHub client : allClients) {
+                if (!alreadyAdded.contains(client)) {
+                    clientsToTry.add(client);
+                    alreadyAdded.add(client);
+                }
+
+            }
+
+            for (int i = 0; i < clientsToTry.size(); i++) {
+                GitHub github = clientsToTry.get(i);
+                boolean isDiscovering = i < discoveringClients.size();
                 try {
                     if (type == IssueType.PULL_REQUEST) {
-                        Log.tracef("Fetching PR details: %s#%d (trying client %d/%d)",
-                            ref.repoFullName, ref.number, clients.indexOf(github) + 1, clients.size());
+                        Log.tracef("Fetching PR details: %s#%d (trying client %d/%d%s)",
+                                ref.repoFullName, ref.number, i + 1, clientsToTry.size(),
+                                isDiscovering ? " - discovered by this client" : " - fallback");
+                    } else {
+                        Log.tracef("Fetching issue details: %s#%d (trying client %d/%d%s)",
+                                ref.repoFullName, ref.number, i + 1, clientsToTry.size(),
+                                isDiscovering ? " - discovered by this client" : " - fallback");
                     }
 
                     GHRepository repo = github.getRepository(ref.repoFullName);
@@ -574,22 +597,27 @@ public class GitHubProvider implements ActivityProvider {
 
                     activities.add(activity);
                     fetched = true;
+                    if (i >= discoveringClients.size()) {
+                        Log.infof("Successfully fetched %s %s#%d using fallback client %d/%d",
+                            type == IssueType.PULL_REQUEST ? "PR" : "issue",
+                            ref.repoFullName, ref.number, i + 1, clientsToTry.size());
+                    }
                     break; // Success - no need to try other clients
 
                 } catch (Exception e) {
                     lastException = e;
                     // Continue to next client
-                    if (clients.indexOf(github) < clients.size() - 1) {
+                    if (i < clientsToTry.size() - 1) {
                         Log.tracef("Failed to fetch with client %d/%d, trying next: %s",
-                            clients.indexOf(github) + 1, clients.size(), e.getMessage());
+                            i + 1, clientsToTry.size(), e.getMessage());
                     }
                 }
             }
 
             if (!fetched) {
                 String typeStr = type == IssueType.PULL_REQUEST ? "pull request" : "issue";
-                Log.tracef("Failed to fetch %s %s#%d with any client (%d tried): %s",
-                    typeStr, ref.repoFullName, ref.number, clients.size(),
+                Log.warnf("Failed to fetch %s %s#%d with any client (%d tried, %d discovered it): %s",
+                    typeStr, ref.repoFullName, ref.number, clientsToTry.size(), discoveringClients.size(),
                     lastException != null ? lastException.getMessage() : "unknown error");
             }
         }
