@@ -10,7 +10,6 @@ providers:
       # GitHub.com
       - name: "GitHub.com"
         url: "https://api.github.com"
-        username: "your-github-username"
         tokens:  # Multiple tokens supported (e.g., for different orgs)
           - "op://Private/GitHub/token"
           # - "op://Private/GitHub-Org1/token"
@@ -20,7 +19,6 @@ providers:
       # GitHub Enterprise (optional)
       # - name: "Company GitHub Enterprise"
       #   url: "https://github.company.com/api/v3"
-      #   username: "your-ghe-username"
       #   tokens:
       #     - "op://Work/GitHub-Enterprise/token?account=my-work-account"
       #   default-project: "Infrastructure"
