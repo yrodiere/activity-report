@@ -16,11 +16,11 @@ import java.util.*;
  * GitHub Activity Provider supporting multiple instances (GitHub.com and GitHub Enterprise)
  */
 public class GitHubProvider implements ActivityProvider {
-    private final List<GitHub> githubClients;
-    private final List<GitHub> publicGithubClients;
-    private final List<InstanceInfo> instanceInfos;
+    private final List<InstanceWithClients> instances;
 
     private record InstanceInfo(String name, String defaultProject, CategoryFilterFunction categoryFilters) {}
+
+    private record InstanceWithClients(InstanceInfo info, List<GitHub> clients) {}
 
     private static GitHub createGitHubClient(String url, String token) throws IOException {
         GitHubBuilder builder = new GitHubBuilder();
@@ -41,46 +41,47 @@ public class GitHubProvider implements ActivityProvider {
     }
 
     public GitHubProvider(AppConfig config, UrlExtractor urlExtractor) {
-        this.githubClients = new ArrayList<>();
-        this.publicGithubClients = new ArrayList<>();
-        this.instanceInfos = new ArrayList<>();
+        this.instances = new ArrayList<>();
 
         config.providers().github().ifPresent(github -> {
             if (github.enabled() && github.instances() != null) {
                 for (var instance : github.instances()) {
                     try {
                         String apiUrl = instance.url().orElse("https://api.github.com");
+                        List<String> tokens = instance.tokens().orElse(List.of());
 
-                        GitHub client = createGitHubClient(
-                            apiUrl,
-                            instance.token().orElse(null)
-                        );
-                        githubClients.add(client);
+                        if (tokens.isEmpty()) {
+                            Log.warnf("No tokens configured for GitHub instance %s, skipping", instance.name());
+                            continue;
+                        }
 
-                        // Create public events client if token is configured
-                        GitHub publicClient = null;
-                        if (instance.publicEventsToken().isPresent()) {
+                        List<GitHub> clients = new ArrayList<>();
+                        for (String token : tokens) {
                             try {
-                                publicClient = createGitHubClient(
-                                    apiUrl,
-                                    instance.publicEventsToken().get()
-                                );
+                                GitHub client = createGitHubClient(apiUrl, token);
+                                clients.add(client);
                             } catch (IOException e) {
-                                Log.warnf("Failed to initialize public events client for GitHub instance %s: %s",
+                                Log.warnf("Failed to initialize GitHub client for instance %s with token: %s",
                                     instance.name(), e.getMessage());
                             }
                         }
-                        publicGithubClients.add(publicClient);
 
-                        instanceInfos.add(new InstanceInfo(
+                        if (clients.isEmpty()) {
+                            Log.warnf("No valid clients created for GitHub instance %s, skipping", instance.name());
+                            continue;
+                        }
+
+                        InstanceInfo info = new InstanceInfo(
                             instance.name(),
                             instance.defaultProject().orElse(null),
                             new CategoryFilterFunction(instance.categoryFilters().orElse(List.of()))
-                        ));
+                        );
+
+                        instances.add(new InstanceWithClients(info, clients));
 
                         // Register this instance for URL extraction
                         urlExtractor.registerGitHubInstance(apiUrl, instance.name());
-                    } catch (IOException e) {
+                    } catch (Exception e) {
                         Log.warnf("Failed to initialize GitHub instance %s: %s", instance.name(), e.getMessage());
                     }
                 }
@@ -95,66 +96,67 @@ public class GitHubProvider implements ActivityProvider {
 
     @Override
     public boolean isConfigured() {
-        return !githubClients.isEmpty();
+        return !instances.isEmpty();
     }
 
     @Override
     public List<Activity> fetchActivities(Instant startDate, Instant endDate, UrlExtractor urlExtractor) throws Exception {
         List<Activity> allActivities = new ArrayList<>();
 
-        for (int i = 0; i < githubClients.size(); i++) {
-            GitHub github = githubClients.get(i);
-            GitHub publicGitHub = publicGithubClients.get(i);
-            InstanceInfo instanceInfo = instanceInfos.get(i);
+        for (InstanceWithClients instanceWithClients : instances) {
+            InstanceInfo instanceInfo = instanceWithClients.info;
+            List<GitHub> clients = instanceWithClients.clients;
             String instanceName = instanceInfo.name;
 
             try {
-                Log.infof("Fetching activities from GitHub instance: %s", instanceName);
+                Log.infof("Fetching activities from GitHub instance: %s (%d token(s))", instanceName, clients.size());
 
-                GHUser currentUser = github.getMyself();
-                String currentLogin = currentUser.getLogin();
+                // Step 1: Use events API to discover issues/PRs across all tokens
+                Map<IssueRef, IssueRefWithClients> issueRefs = new HashMap<>();
+                Map<IssueRef, IssueRefWithClients> prRefs = new HashMap<>();
 
-                // Step 1: Use events API to discover issues/PRs
-                Map<IssueRef, IssueRefWithClient> issueRefs = new HashMap<>();
-                Map<IssueRef, IssueRefWithClient> prRefs = new HashMap<>();
+                for (int tokenIndex = 0; tokenIndex < clients.size(); tokenIndex++) {
+                    GitHub github = clients.get(tokenIndex);
+                    String tokenLabel = clients.size() > 1 ? String.format("token %d/%d", tokenIndex + 1, clients.size()) : "token";
 
-                // Process authenticated events (filtered by token scope)
-                Log.tracef("Fetching authenticated events for user %s", currentLogin);
-                PagedIterable<GHEventInfo> authenticatedEvents = currentUser.listEvents();
-                processEvents("authenticated", github, authenticatedEvents, issueRefs, prRefs, startDate, endDate);
-
-                // Process public events (unfiltered, to work around fine-grained token limitations)
-                // Only if publicEventsToken is configured to avoid rate limiting issues
-                if (publicGitHub != null) {
                     try {
-                        Log.tracef("Fetching public events for user %s (using publicEventsToken)", currentLogin);
-                        List<GHEventInfo> publicEventsList = publicGitHub.getUserPublicEvents(currentLogin);
-                        processEvents("public", publicGitHub, publicEventsList, issueRefs, prRefs, startDate, endDate);
-                    } catch (org.kohsuke.github.HttpException e) {
-                        // Check for rate limit error (403 or 429 status codes)
-                        int responseCode = e.getResponseCode();
-                        String message = e.getMessage();
-                        if (responseCode == 403 || responseCode == 429 ||
-                            (message != null && message.toLowerCase().contains("rate limit"))) {
-                            Log.warnf("Cannot use public events API with configured publicEventsToken due to rate limits. " +
-                                "Some activities from organizations not accessible by your main token may be missing.");
-                        } else {
-                            Log.warnf("Failed to fetch public events: %s", message);
+                        GHUser currentUser = github.getMyself();
+                        String currentLogin = currentUser.getLogin();
+
+                        // Process authenticated events (filtered by token scope)
+                        Log.tracef("Fetching authenticated events for user %s (%s)", currentLogin, tokenLabel);
+                        PagedIterable<GHEventInfo> authenticatedEvents = currentUser.listEvents();
+                        processEvents(String.format("authenticated (%s)", tokenLabel), github, authenticatedEvents, issueRefs, prRefs, startDate, endDate);
+
+                        // Process public events to work around fine-grained token limitations
+                        try {
+                            Log.tracef("Fetching public events for user %s (%s)", currentLogin, tokenLabel);
+                            List<GHEventInfo> publicEventsList = github.getUserPublicEvents(currentLogin);
+                            processEvents(String.format("public (%s)", tokenLabel), github, publicEventsList, issueRefs, prRefs, startDate, endDate);
+                        } catch (org.kohsuke.github.HttpException e) {
+                            int responseCode = e.getResponseCode();
+                            String message = e.getMessage();
+                            if (responseCode == 403 || responseCode == 429 ||
+                                (message != null && message.toLowerCase().contains("rate limit"))) {
+                                Log.debugf("Public events API rate limited for %s, continuing with authenticated events only", tokenLabel);
+                            } else {
+                                Log.warnf("Failed to fetch public events for %s: %s", tokenLabel, message);
+                            }
+                        } catch (IOException e) {
+                            Log.debugf("Failed to fetch public events for %s: %s", tokenLabel, e.getMessage());
                         }
-                    } catch (IOException e) {
-                        Log.warnf("Failed to fetch public events: %s", e.getMessage());
+                    } catch (Exception e) {
+                        Log.warnf("Error processing %s for instance %s: %s", tokenLabel, instanceName, e.getMessage());
                     }
-                } else {
-                    Log.debugf("Skipping public events API (no publicEventsToken configured). " +
-                        "If using a fine-grained token, some activities from organizations not accessible by your token may be missing.");
                 }
 
-                Log.tracef("After processing all events: Found %d issues, %d PRs", issueRefs.size(), prRefs.size());
+                Log.tracef("After processing all tokens: Found %d issues, %d PRs", issueRefs.size(), prRefs.size());
 
                 // Step 2: Fetch full details for each unique issue/PR
+                // Pass all clients for fallback - not just the ones that discovered each issue
                 int beforeCount = allActivities.size();
-                allActivities.addAll(fetchIssueOrPRDetails(IssueType.ISSUE, instanceInfo, currentLogin, issueRefs, startDate, endDate, urlExtractor));
-                allActivities.addAll(fetchIssueOrPRDetails(IssueType.PULL_REQUEST, instanceInfo, currentLogin, prRefs, startDate, endDate, urlExtractor));
+                allActivities.addAll(fetchIssueOrPRDetails(IssueType.ISSUE, instanceInfo, clients, issueRefs, startDate, endDate, urlExtractor));
+                allActivities.addAll(fetchIssueOrPRDetails(IssueType.PULL_REQUEST, instanceInfo, clients, prRefs, startDate, endDate, urlExtractor));
                 int foundCount = allActivities.size() - beforeCount;
 
                 Log.infof("Found %d activities from GitHub instance: %s", foundCount, instanceName);
@@ -233,7 +235,7 @@ public class GitHubProvider implements ActivityProvider {
 
     private record IssueRef(String repoFullName, int number) {}
 
-    private record IssueRefWithClient(IssueRef ref, Instant timestamp, GitHub client) {}
+    private record IssueRefWithClients(IssueRef ref, Instant timestamp, List<GitHub> clients) {}
 
     private enum IssueType {
         ISSUE("issue"),
@@ -264,7 +266,7 @@ public class GitHubProvider implements ActivityProvider {
     }
 
     private void processEvents(String eventSource, GitHub github, Iterable<GHEventInfo> events,
-                               Map<IssueRef, IssueRefWithClient> issueRefs, Map<IssueRef, IssueRefWithClient> prRefs,
+                               Map<IssueRef, IssueRefWithClients> issueRefs, Map<IssueRef, IssueRefWithClients> prRefs,
                                Instant startDate, Instant endDate) {
         int eventCount = 0;
         int beforeIssues = issueRefs.size();
@@ -326,59 +328,74 @@ public class GitHubProvider implements ActivityProvider {
             eventSource, eventCount, earliestEventInfo, newIssues, newPRs);
     }
 
-    private void extractReferences(GitHub github, GHEventInfo event, Instant eventTimestamp,
-                                   Map<IssueRef, IssueRefWithClient> issueRefs, Map<IssueRef, IssueRefWithClient> prRefs) throws IOException {
-        // Get repository name from event, not from issue/PR objects
-        // This avoids triggering API calls with the wrong token
-        GHRepository eventRepo = event.getRepository();
-        if (eventRepo == null) {
-            return;
+    /**
+     * Extract repository owner/name from issue or PR URL.
+     * Handles both HTML URLs (https://github.com/owner/repo/issues/123)
+     * and API URLs (https://api.github.com/repos/owner/repo/issues/123 or
+     * https://api.github.ibm.com/api/v3/repos/owner/repo/issues/123 for GHE)
+     */
+    private String extractRepoFromUrl(java.net.URL url) {
+        if (url == null) return null;
+        try {
+            String path = url.getPath();
+            String[] parts = path.split("/");
+
+            // Find "repos" in the path (handles both GitHub.com and GHE)
+            // API URL: /repos/owner/repo/... or /api/v3/repos/owner/repo/...
+            for (int i = 0; i < parts.length; i++) {
+                if ("repos".equals(parts[i]) && i + 2 < parts.length) {
+                    return parts[i + 1] + "/" + parts[i + 2];
+                }
+            }
+
+            // Fallback: HTML URL format /owner/repo/...
+            if (parts.length >= 3) {
+                return parts[1] + "/" + parts[2];
+            }
+        } catch (Exception e) {
+            Log.tracef("Failed to extract repo from URL %s: %s", url, e.getMessage());
         }
-        String repoFullName = eventRepo.getFullName();
+        return null;
+    }
+
+    private void extractReferences(GitHub github, GHEventInfo event, Instant eventTimestamp,
+                                   Map<IssueRef, IssueRefWithClients> issueRefs, Map<IssueRef, IssueRefWithClients> prRefs) throws IOException {
+        // Extract repository name from issue/PR URLs
+        // Use getUrl() instead of getHtmlUrl() as it's more reliably populated
+        // payload.getRepository() is always null in the GitHub API library
+        // issue.getRepository() and pr.getRepository() trigger API calls which may fail
 
         switch (event.getType()) {
             case ISSUES -> {
                 var payload = event.getPayload(GHEventPayload.Issue.class);
-                if (payload != null && payload.getIssue() != null) {
-                    var issue = payload.getIssue();
-                    IssueRef ref = new IssueRef(repoFullName, issue.getNumber());
-                    IssueRefWithClient existing = issueRefs.get(ref);
-                    IssueRefWithClient newRefWithClient = new IssueRefWithClient(ref, eventTimestamp, github);
-                    issueRefs.merge(ref, newRefWithClient, (existingRef, newRef) ->
-                        newRef.timestamp.isAfter(existingRef.timestamp) ? newRef : existingRef);
-                    if (existing == null) {
-                        Log.tracef("  -> Found issue: %s#%d", ref.repoFullName, ref.number);
-                    } else if (eventTimestamp.isAfter(existing.timestamp)) {
-                        Log.tracef("  -> Updated issue timestamp: %s#%d (was %s, now %s)", ref.repoFullName, ref.number, existing.timestamp, eventTimestamp);
-                    }
+                if (payload == null || payload.getIssue() == null) {
+                    return;
                 }
+                var issue = payload.getIssue();
+                String repoFullName = extractRepoFromUrl(issue.getUrl());
+                if (repoFullName == null) {
+                    Log.tracef("  -> Cannot extract repository from issue URL: %s", issue.getUrl());
+                    return;
+                }
+                IssueRef ref = new IssueRef(repoFullName, issue.getNumber());
+                addOrUpdateRef(ref, eventTimestamp, github, issueRefs, "issue");
             }
             case ISSUE_COMMENT -> {
                 var payload = event.getPayload(GHEventPayload.IssueComment.class);
-                if (payload != null && payload.getIssue() != null) {
-                    var issue = payload.getIssue();
-                    IssueRef ref = new IssueRef(repoFullName, issue.getNumber());
-                    if (issue.isPullRequest()) {
-                        IssueRefWithClient existing = prRefs.get(ref);
-                        IssueRefWithClient newRefWithClient = new IssueRefWithClient(ref, eventTimestamp, github);
-                        prRefs.merge(ref, newRefWithClient, (existingRef, newRef) ->
-                            newRef.timestamp.isAfter(existingRef.timestamp) ? newRef : existingRef);
-                        if (existing == null) {
-                            Log.tracef("  -> Found PR (from comment): %s#%d", ref.repoFullName, ref.number);
-                        } else if (eventTimestamp.isAfter(existing.timestamp)) {
-                            Log.tracef("  -> Updated PR timestamp: %s#%d (was %s, now %s)", ref.repoFullName, ref.number, existing.timestamp, eventTimestamp);
-                        }
-                    } else {
-                        IssueRefWithClient existing = issueRefs.get(ref);
-                        IssueRefWithClient newRefWithClient = new IssueRefWithClient(ref, eventTimestamp, github);
-                        issueRefs.merge(ref, newRefWithClient, (existingRef, newRef) ->
-                            newRef.timestamp.isAfter(existingRef.timestamp) ? newRef : existingRef);
-                        if (existing == null) {
-                            Log.tracef("  -> Found issue (from comment): %s#%d", ref.repoFullName, ref.number);
-                        } else if (eventTimestamp.isAfter(existing.timestamp)) {
-                            Log.tracef("  -> Updated issue timestamp: %s#%d (was %s, now %s)", ref.repoFullName, ref.number, existing.timestamp, eventTimestamp);
-                        }
-                    }
+                if (payload == null || payload.getIssue() == null) {
+                    return;
+                }
+                var issue = payload.getIssue();
+                String repoFullName = extractRepoFromUrl(issue.getUrl());
+                if (repoFullName == null) {
+                    Log.tracef("  -> Cannot extract repository from issue URL: %s", issue.getUrl());
+                    return;
+                }
+                IssueRef ref = new IssueRef(repoFullName, issue.getNumber());
+                if (issue.isPullRequest()) {
+                    addOrUpdateRef(ref, eventTimestamp, github, prRefs, "PR (from comment)");
+                } else {
+                    addOrUpdateRef(ref, eventTimestamp, github, issueRefs, "issue (from comment)");
                 }
             }
             case PULL_REQUEST, PULL_REQUEST_REVIEW, PULL_REQUEST_REVIEW_COMMENT -> {
@@ -393,18 +410,42 @@ public class GitHubProvider implements ActivityProvider {
                     var payload = event.getPayload(GHEventPayload.PullRequestReviewComment.class);
                     if (payload != null) pr = payload.getPullRequest();
                 }
-                if (pr != null) {
-                    IssueRef ref = new IssueRef(repoFullName, pr.getNumber());
-                    IssueRefWithClient existing = prRefs.get(ref);
-                    IssueRefWithClient newRefWithClient = new IssueRefWithClient(ref, eventTimestamp, github);
-                    prRefs.merge(ref, newRefWithClient, (existingRef, newRef) ->
-                        newRef.timestamp.isAfter(existingRef.timestamp) ? newRef : existingRef);
-                    if (existing == null) {
-                        Log.tracef("  -> Found PR: %s#%d", ref.repoFullName, ref.number);
-                    } else if (eventTimestamp.isAfter(existing.timestamp)) {
-                        Log.tracef("  -> Updated PR timestamp: %s#%d (was %s, now %s)", ref.repoFullName, ref.number, existing.timestamp, eventTimestamp);
-                    }
+                if (pr == null) {
+                    return;
                 }
+                String repoFullName = extractRepoFromUrl(pr.getUrl());
+                if (repoFullName == null) {
+                    Log.tracef("  -> Cannot extract repository from PR URL: %s", pr.getUrl());
+                    return;
+                }
+                IssueRef ref = new IssueRef(repoFullName, pr.getNumber());
+                addOrUpdateRef(ref, eventTimestamp, github, prRefs, "PR");
+            }
+        }
+    }
+
+    private void addOrUpdateRef(IssueRef ref, Instant eventTimestamp, GitHub github,
+                                Map<IssueRef, IssueRefWithClients> refs, String typeName) {
+        IssueRefWithClients existing = refs.get(ref);
+        if (existing == null) {
+            // New reference - create with single client
+            List<GitHub> clients = new ArrayList<>();
+            clients.add(github);
+            refs.put(ref, new IssueRefWithClients(ref, eventTimestamp, clients));
+            Log.tracef("  -> Found %s: %s#%d", typeName, ref.repoFullName, ref.number);
+        } else {
+            // Existing reference - update timestamp if newer and add client if not already present
+            Instant newTimestamp = eventTimestamp.isAfter(existing.timestamp) ? eventTimestamp : existing.timestamp;
+            List<GitHub> updatedClients = new ArrayList<>(existing.clients);
+            if (!updatedClients.contains(github)) {
+                updatedClients.add(github);
+            }
+            refs.put(ref, new IssueRefWithClients(ref, newTimestamp, updatedClients));
+            if (eventTimestamp.isAfter(existing.timestamp)) {
+                Log.tracef("  -> Updated %s timestamp: %s#%d (was %s, now %s)", typeName, ref.repoFullName, ref.number, existing.timestamp, eventTimestamp);
+            }
+            if (!existing.clients.contains(github)) {
+                Log.tracef("  -> Added client for %s: %s#%d (now %d client(s))", typeName, ref.repoFullName, ref.number, updatedClients.size());
             }
         }
     }
@@ -437,141 +478,192 @@ public class GitHubProvider implements ActivityProvider {
     /**
      * Fetch details for issues or pull requests.
      * Unified method to avoid code duplication between issues and PRs.
+     *
+     * @param allClients All clients for this instance - used for fallback when discovering clients lack access
      */
-    private List<Activity> fetchIssueOrPRDetails(IssueType type, InstanceInfo instanceInfo, String currentLogin,
-                                                 Map<IssueRef, IssueRefWithClient> refs, Instant startDate,
+    private List<Activity> fetchIssueOrPRDetails(IssueType type, InstanceInfo instanceInfo,
+                                                 List<GitHub> allClients,
+                                                 Map<IssueRef, IssueRefWithClients> refs, Instant startDate,
                                                  Instant endDate, UrlExtractor urlExtractor) {
         List<Activity> activities = new ArrayList<>();
         String source = "GitHub - " + instanceInfo.name;
 
-        for (IssueRefWithClient refWithClient : refs.values()) {
-            IssueRef ref = refWithClient.ref;
-            Instant eventTimestamp = refWithClient.timestamp;
-            GitHub github = refWithClient.client;
-            try {
-                if (type == IssueType.PULL_REQUEST) {
-                    Log.tracef("Fetching PR details: %s#%d", ref.repoFullName, ref.number);
+        for (IssueRefWithClients refWithClients : refs.values()) {
+            IssueRef ref = refWithClients.ref;
+            Instant eventTimestamp = refWithClients.timestamp;
+            List<GitHub> discoveringClients = refWithClients.clients;
+
+            // Try all instance clients (not just discovering ones) for maximum fallback coverage
+            // Org tokens might not allow listing user events, so they wouldn't be in discoveringClients
+            boolean fetched = false;
+            Exception lastException = null;
+
+            // Start with discovering clients (most likely to succeed), then try others as fallback
+            List<GitHub> clientsToTry = new ArrayList<>(discoveringClients);
+            Set<GitHub> alreadyAdded = new HashSet<>(discoveringClients);
+            for (GitHub client : allClients) {
+                if (!alreadyAdded.contains(client)) {
+                    clientsToTry.add(client);
+                    alreadyAdded.add(client);
                 }
 
-                GHRepository repo = github.getRepository(ref.repoFullName);
+            }
 
-                // Fetch issue or PR (GHPullRequest extends GHIssue)
-                GHIssue issue;
-                GHPullRequest pr = null;
-                if (type == IssueType.PULL_REQUEST) {
-                    pr = repo.getPullRequest(ref.number);
-                    issue = pr; // GHPullRequest IS-A GHIssue
-                    Log.tracef("  PR %s#%d: eventTimestamp=%s", ref.repoFullName, ref.number, eventTimestamp);
-                } else {
-                    issue = repo.getIssue(ref.number);
-                }
+            for (int i = 0; i < clientsToTry.size(); i++) {
+                GitHub github = clientsToTry.get(i);
+                boolean isDiscovering = i < discoveringClients.size();
+                try {
+                    if (type == IssueType.PULL_REQUEST) {
+                        Log.tracef("Fetching PR details: %s#%d (trying client %d/%d%s)",
+                                ref.repoFullName, ref.number, i + 1, clientsToTry.size(),
+                                isDiscovering ? " - discovered by this client" : " - fallback");
+                    } else {
+                        Log.tracef("Fetching issue details: %s#%d (trying client %d/%d%s)",
+                                ref.repoFullName, ref.number, i + 1, clientsToTry.size(),
+                                isDiscovering ? " - discovered by this client" : " - fallback");
+                    }
 
-                // Determine action category
-                ActionCategory actionCategory;
-                if (type == IssueType.PULL_REQUEST) {
-                    GHPullRequest finalPr = pr; // Capture for lambda
-                    actionCategory = instanceInfo.categoryFilters.matchPullRequest(finalPr)
-                        .orElseGet(() -> {
-                            try {
-                                boolean isAuthor = finalPr.getUser().getLogin().equals(currentLogin);
-                                return isAuthor ? ActionCategory.CODE : ActionCategory.REVIEW;
-                            } catch (Exception e) {
-                                Log.tracef("Failed to determine PR author for %s#%d, defaulting to review: %s",
-                                    ref.repoFullName, ref.number, e.getMessage());
-                                return ActionCategory.REVIEW;
+                    GHRepository repo = github.getRepository(ref.repoFullName);
+
+                    // Fetch issue or PR (GHPullRequest extends GHIssue)
+                    GHIssue issue;
+                    GHPullRequest pr = null;
+                    if (type == IssueType.PULL_REQUEST) {
+                        pr = repo.getPullRequest(ref.number);
+                        issue = pr; // GHPullRequest IS-A GHIssue
+                        Log.tracef("  PR %s#%d: eventTimestamp=%s", ref.repoFullName, ref.number, eventTimestamp);
+                    } else {
+                        issue = repo.getIssue(ref.number);
+                    }
+
+                    // Determine action category
+                    ActionCategory actionCategory;
+                    if (type == IssueType.PULL_REQUEST) {
+                        GHPullRequest finalPr = pr; // Capture for lambda
+                        GitHub finalGithub = github; // Capture for lambda
+                        actionCategory = instanceInfo.categoryFilters.matchPullRequest(finalPr)
+                            .orElseGet(() -> {
+                                try {
+                                    String currentLogin = finalGithub.getMyself().getLogin();
+                                    boolean isAuthor = finalPr.getUser().getLogin().equals(currentLogin);
+                                    return isAuthor ? ActionCategory.CODE : ActionCategory.REVIEW;
+                                } catch (Exception e) {
+                                    Log.tracef("Failed to determine PR author for %s#%d, defaulting to review: %s",
+                                        ref.repoFullName, ref.number, e.getMessage());
+                                    return ActionCategory.REVIEW;
+                                }
+                            });
+                        if (instanceInfo.categoryFilters.matchPullRequest(finalPr).isPresent()) {
+                            Log.tracef("  PR %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
+                        }
+                    } else {
+                        actionCategory = instanceInfo.categoryFilters.matchIssue(issue)
+                            .orElse(ActionCategory.DISCUSS);
+                        if (actionCategory != ActionCategory.DISCUSS) {
+                            Log.tracef("  Issue %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
+                        }
+                    }
+
+                    // Collect all relevant links within date range
+                    List<String> contentUrls = new ArrayList<>();
+                    Set<String> externalUrls = new LinkedHashSet<>();
+
+                    // Extract external URLs from title
+                    String title = issue.getTitle();
+                    if (title != null) {
+                        urlExtractor.extractExternalUrls(title, externalUrls);
+                    }
+
+                    // Extract external URLs from body
+                    String body = issue.getBody();
+                    if (body != null) {
+                        urlExtractor.extractExternalUrls(body, externalUrls);
+                    }
+
+                    // Extract #1234 references from title and body (GitHub-instance specific)
+                    extractHashReferences(ref.repoFullName, title, body, contentUrls);
+
+                    // Extract external URLs from comments
+                    extractFromComments(issue.getComments(), externalUrls, startDate, endDate, urlExtractor);
+
+                    // For PRs, also extract from reviews and review comments
+                    if (type == IssueType.PULL_REQUEST) {
+                        // Extract external URLs from review bodies
+                        for (GHPullRequestReview review : pr.listReviews()) {
+                            Instant reviewDate = review.getSubmittedAt().toInstant();
+                            if (!reviewDate.isBefore(startDate) && !reviewDate.isAfter(endDate)) {
+                                String reviewBody = review.getBody();
+                                if (reviewBody != null) {
+                                    urlExtractor.extractExternalUrls(reviewBody, externalUrls);
+                                }
                             }
-                        });
-                    if (instanceInfo.categoryFilters.matchPullRequest(finalPr).isPresent()) {
-                        Log.tracef("  PR %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
-                    }
-                } else {
-                    actionCategory = instanceInfo.categoryFilters.matchIssue(issue)
-                        .orElse(ActionCategory.DISCUSS);
-                    if (actionCategory != ActionCategory.DISCUSS) {
-                        Log.tracef("  Issue %s#%d: Categorized as %s based on filters", ref.repoFullName, ref.number, actionCategory);
-                    }
-                }
+                        }
 
-                // Collect all relevant links within date range
-                List<String> contentUrls = new ArrayList<>();
-                Set<String> externalUrls = new LinkedHashSet<>();
-
-                // Extract external URLs from title
-                String title = issue.getTitle();
-                if (title != null) {
-                    urlExtractor.extractExternalUrls(title, externalUrls);
-                }
-
-                // Extract external URLs from body
-                String body = issue.getBody();
-                if (body != null) {
-                    urlExtractor.extractExternalUrls(body, externalUrls);
-                }
-
-                // Extract #1234 references from title and body (GitHub-instance specific)
-                extractHashReferences(ref.repoFullName, title, body, contentUrls);
-
-                // Extract external URLs from comments
-                extractFromComments(issue.getComments(), externalUrls, startDate, endDate, urlExtractor);
-
-                // For PRs, also extract from reviews and review comments
-                if (type == IssueType.PULL_REQUEST) {
-                    // Extract external URLs from review bodies
-                    for (GHPullRequestReview review : pr.listReviews()) {
-                        Instant reviewDate = review.getSubmittedAt().toInstant();
-                        if (!reviewDate.isBefore(startDate) && !reviewDate.isAfter(endDate)) {
-                            String reviewBody = review.getBody();
-                            if (reviewBody != null) {
-                                urlExtractor.extractExternalUrls(reviewBody, externalUrls);
+                        // Extract external URLs from review comments
+                        for (GHPullRequestReviewComment reviewComment : pr.listReviewComments()) {
+                            Instant commentDate = reviewComment.getCreatedAt().toInstant();
+                            if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
+                                String commentBody = reviewComment.getBody();
+                                if (commentBody != null) {
+                                    urlExtractor.extractExternalUrls(commentBody, externalUrls);
+                                }
                             }
                         }
                     }
 
-                    // Extract external URLs from review comments
-                    for (GHPullRequestReviewComment reviewComment : pr.listReviewComments()) {
-                        Instant commentDate = reviewComment.getCreatedAt().toInstant();
-                        if (!commentDate.isBefore(startDate) && !commentDate.isAfter(endDate)) {
-                            String commentBody = reviewComment.getBody();
-                            if (commentBody != null) {
-                                urlExtractor.extractExternalUrls(commentBody, externalUrls);
-                            }
-                        }
+                    // Add extracted external URLs to contentUrls
+                    contentUrls.addAll(externalUrls);
+
+                    if (!externalUrls.isEmpty()) {
+                        String typeStr = type == IssueType.PULL_REQUEST ? "PR" : "Issue";
+                        Log.tracef("  %s %s#%d: Extracted %d external URLs", typeStr, ref.repoFullName, ref.number, externalUrls.size());
+                    }
+
+                    // Create activity - use event timestamp that discovered this issue/PR
+                    if (type == IssueType.PULL_REQUEST) {
+                        Log.tracef("  PR %s#%d: Creating activity (contentUrls=%d)", ref.repoFullName, ref.number, contentUrls.size());
+                    }
+
+                    Activity activity = new Activity(
+                        source,
+                        type.actionName,
+                        actionCategory,
+                        ref.repoFullName + "#" + ref.number + ": " + issue.getTitle(),
+                        "", // description
+                        issue.getHtmlUrl().toString(),
+                        eventTimestamp,
+                        contentUrls
+                    );
+
+                    // Add default project if configured
+                    if (instanceInfo.defaultProject != null) {
+                        activity.addMetadata("defaultProject", instanceInfo.defaultProject);
+                    }
+
+                    activities.add(activity);
+                    fetched = true;
+                    if (i >= discoveringClients.size()) {
+                        Log.infof("Successfully fetched %s %s#%d using fallback client %d/%d",
+                            type == IssueType.PULL_REQUEST ? "PR" : "issue",
+                            ref.repoFullName, ref.number, i + 1, clientsToTry.size());
+                    }
+                    break; // Success - no need to try other clients
+
+                } catch (Exception e) {
+                    lastException = e;
+                    // Continue to next client
+                    if (i < clientsToTry.size() - 1) {
+                        Log.tracef("Failed to fetch with client %d/%d, trying next: %s",
+                            i + 1, clientsToTry.size(), e.getMessage());
                     }
                 }
+            }
 
-                // Add extracted external URLs to contentUrls
-                contentUrls.addAll(externalUrls);
-
-                if (!externalUrls.isEmpty()) {
-                    String typeStr = type == IssueType.PULL_REQUEST ? "PR" : "Issue";
-                    Log.tracef("  %s %s#%d: Extracted %d external URLs", typeStr, ref.repoFullName, ref.number, externalUrls.size());
-                }
-
-                // Create activity - use event timestamp that discovered this issue/PR
-                if (type == IssueType.PULL_REQUEST) {
-                    Log.tracef("  PR %s#%d: Creating activity (contentUrls=%d)", ref.repoFullName, ref.number, contentUrls.size());
-                }
-
-                Activity activity = new Activity(
-                    source,
-                    type.actionName,
-                    actionCategory,
-                    ref.repoFullName + "#" + ref.number + ": " + issue.getTitle(),
-                    "", // description
-                    issue.getHtmlUrl().toString(),
-                    eventTimestamp,
-                    contentUrls
-                );
-
-                // Add default project if configured
-                if (instanceInfo.defaultProject != null) {
-                    activity.addMetadata("defaultProject", instanceInfo.defaultProject);
-                }
-
-                activities.add(activity);
-            } catch (Exception e) {
+            if (!fetched) {
                 String typeStr = type == IssueType.PULL_REQUEST ? "pull request" : "issue";
-                Log.tracef("Failed to fetch %s %s#%d: %s", typeStr, ref.repoFullName, ref.number, e.getMessage());
+                Log.warnf("Failed to fetch %s %s#%d with any client (%d tried, %d discovered it): %s",
+                    typeStr, ref.repoFullName, ref.number, clientsToTry.size(), discoveringClients.size(),
+                    lastException != null ? lastException.getMessage() : "unknown error");
             }
         }
 

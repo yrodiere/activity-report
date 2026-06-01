@@ -38,8 +38,8 @@ public class OnePasswordConfigSourceInterceptor implements ConfigSourceIntercept
 
         String value = configValue.getValue();
 
-        // Check if the value is a 1Password reference
-        if (!value.startsWith("op://")) {
+        // Check if the value contains any 1Password references
+        if (!value.contains("op://")) {
             return configValue;
         }
 
@@ -52,6 +52,51 @@ public class OnePasswordConfigSourceInterceptor implements ConfigSourceIntercept
         // Show prompt before first 1Password access
         showPromptIfNeeded();
 
+        // Handle array values (comma-separated) - Quarkus represents arrays this way
+        if (value.contains(",")) {
+            // Split on comma and resolve each reference
+            String[] references = value.split(",");
+            StringBuilder resolvedArray = new StringBuilder();
+
+            for (int i = 0; i < references.length; i++) {
+                String ref = references[i].trim();
+
+                if (ref.startsWith("op://")) {
+                    String resolved = resolveReference(ref, name + "[" + i + "]");
+                    if (resolved == null) {
+                        Log.warnf("Failed to resolve 1Password reference for property '%s': %s", name, value);
+                        return configValue; // Return original if any reference fails
+                    }
+                    if (i > 0) {
+                        resolvedArray.append(',');
+                    }
+                    resolvedArray.append(resolved);
+                } else {
+                    // Not a 1Password reference, keep as-is
+                    if (i > 0) {
+                        resolvedArray.append(',');
+                    }
+                    resolvedArray.append(ref);
+                }
+            }
+
+            return configValue.withValue(resolvedArray.toString());
+        } else {
+            // Single value
+            if (value.startsWith("op://")) {
+                String resolved = resolveReference(value, name);
+                if (resolved == null) {
+                    Log.warnf("Failed to resolve 1Password reference for property '%s': %s", name, value);
+                    return configValue;
+                }
+                return configValue.withValue(resolved);
+            } else {
+                return configValue;
+            }
+        }
+    }
+
+    private String resolveReference(String value, String propertyName) {
         // Parse account from query parameter if present
         String account = null;
         String cleanReference = value;
@@ -66,7 +111,7 @@ public class OnePasswordConfigSourceInterceptor implements ConfigSourceIntercept
                 String[] parts = param.split("=", 2);
                 if (parts.length == 2 && "account".equals(parts[0])) {
                     account = parts[1];
-                    Log.debugf("Using 1Password account '%s' for property '%s'", account, name);
+                    Log.debugf("Using 1Password account '%s' for property '%s'", account, propertyName);
                     break;
                 }
             }
@@ -75,15 +120,11 @@ public class OnePasswordConfigSourceInterceptor implements ConfigSourceIntercept
         // Resolve the 1Password reference
         String resolvedValue = readFromOnePassword(cleanReference, account);
 
-        if (resolvedValue == null) {
-            Log.warnf("Failed to resolve 1Password reference for property '%s': %s", name, value);
-            return configValue;
+        if (resolvedValue != null) {
+            Log.debugf("Resolved 1Password secret for property '%s'", propertyName);
         }
 
-        Log.debugf("Resolved 1Password secret for property '%s'", name);
-
-        // Return a new ConfigValue with the resolved secret
-        return configValue.withValue(resolvedValue);
+        return resolvedValue;
     }
 
     private static void showPromptIfNeeded() {

@@ -93,7 +93,8 @@ The application can automatically resolve 1Password secret references in your co
        enabled: true
        instances:
          - name: "GitHub.com"
-           token: op://Private/GitHub/token
+           tokens:
+             - op://Private/GitHub/token
      jira:
        enabled: true
        instances:
@@ -121,10 +122,10 @@ The application can automatically resolve 1Password secret references in your co
 >   github:
 >     enabled: true
 >     instances:
->       - name: "Personal GitHub"
->         token: "op://Personal/GitHub/token?account=my-personal-account"
->       - name: "Work GitHub"
->         token: "op://Work/GitHub/token?account=my-work-account"
+>       - name: "GitHub.com"
+>         tokens:
+>           - "op://Personal/GitHub/token?account=my-personal-account"
+>           - "op://Work/GitHub-OrgA/token?account=my-work-account"
 > ```
 >
 > Without the `?account` parameter, 1Password CLI will use your default account or the one most recently signed in.
@@ -144,7 +145,7 @@ export ZULIP_API_KEY="xxxxxxxxxxxxx"
 
 #### GitHub
 
-You have three options for GitHub authentication:
+You have two main options for GitHub authentication:
 
 **Option 1: Classic Token (Full Access)**
 1. Go to https://github.com/settings/tokens
@@ -162,22 +163,16 @@ Note: The `repo` scope grants READ+WRITE access to all accessible repositories.
 3. For organization private repos: Token must be authorized by the organization
 4. Copy token and store securely
 
-Note: Fine-grained tokens are READ-ONLY but filter events based on token scope. If you use a fine-grained token, you may need to also configure a `public-events-token` (see below).
+Note: Fine-grained tokens are READ-ONLY but filter events based on token scope. For work spanning multiple organizations, you can configure multiple tokens (see "Multiple Tokens per Instance" below).
 
-**Option 3: Public Events Token (For Fine-Grained Token Users)**
+**Multiple Tokens per Instance**
 
-If you use a fine-grained token as your main token, it will filter public events based on the token's repository/organization scope. This means you might miss public activities from organizations not accessible by your token.
+If your work spans multiple organizations with private repositories, you can provide multiple tokens for a single GitHub instance. This is useful when:
+- Using fine-grained tokens that are scoped to specific organizations
+- Working with private org repositories requiring different access tokens
+- One token has limited access but another can fill the gaps
 
-To work around this, create a separate classic token with **NO scopes** for fetching public events:
-1. Go to https://github.com/settings/tokens
-2. Click "Generate new token (classic)"
-3. **DO NOT select any scopes** (leave all checkboxes unchecked)
-4. Copy token and configure as `public-events-token` in your config
-
-Benefits:
-- Sees ALL public events without organization filtering
-- Higher rate limits (5000 requests/hour) vs unauthenticated access (60 requests/hour)
-- No write permissions (more secure)
+Each token discovers and fetches issues/PRs it has access to. The tool automatically tries all available tokens when fetching details, so activities remain accessible even if the discovering token lacks access to the repository.
 
 Example configuration:
 ```yaml
@@ -185,8 +180,10 @@ providers:
   github:
     instances:
       - name: "GitHub.com"
-        token: "op://Private/GitHub-Fine-Grained/token"  # Fine-grained token
-        public-events-token: "op://Private/GitHub-Public-Events/token"  # No-scope classic token
+        tokens:
+          - "op://Private/GitHub/personal-token"  # Personal repos
+          - "op://Private/GitHub/org-a-token"     # Org A private repos
+          - "op://Private/GitHub/org-b-token"     # Org B private repos
 ```
 
 #### JIRA
@@ -373,7 +370,8 @@ providers:
     enabled: true
     instances:
       - name: "GitHub.com"
-        token: "${GITHUB_TOKEN}"
+        tokens:
+          - "${GITHUB_TOKEN}"
         category-filters:
           # Match Dependabot PRs by author
           - category: "CHORE"
@@ -442,7 +440,8 @@ providers:
     enabled: true
     instances:
       - name: "GitHub.com"
-        token: "${GITHUB_TOKEN}"
+        tokens:
+          - "${GITHUB_TOKEN}"
         default-project: "Quarkus"  # Activities from this instance default to Quarkus
 
   zulip:
@@ -467,32 +466,35 @@ providers:
     instances:
       - name: "GitHub.com"
         url: "https://api.github.com"
-        username: "personal-account"
-        token: "${GITHUB_TOKEN}"
+        tokens:
+          - "${GITHUB_TOKEN}"
       - name: "Company GitHub"
         url: "https://github.company.com/api/v3"
-        username: "work-account"
-        token: "${GHE_TOKEN}"
+        tokens:
+          - "${GHE_TOKEN}"
 ```
 
-**Fine-Grained Tokens for Organization Private Repos:**
+**Multiple Tokens for Organization Private Repos:**
 
-GitHub's fine-grained tokens provide read-only access (better security) but must be scoped per organization. You can use multiple instances with different tokens to cover all your organizations:
+GitHub's fine-grained tokens provide read-only access (better security) but must be scoped per organization. You can provide multiple tokens for a single instance to cover all your organizations:
 
 ```yaml
 providers:
   github:
     enabled: true
     instances:
-      - name: "Personal & Public"
-        token: "${GITHUB_PERSONAL_TOKEN}"  # Fine-grained token for personal repos
-      - name: "Org A"
-        token: "${GITHUB_ORG_A_TOKEN}"     # Fine-grained token authorized for Org A
-      - name: "Org B"
-        token: "${GITHUB_ORG_B_TOKEN}"     # Fine-grained token authorized for Org B
+      - name: "GitHub.com"
+        tokens:
+          - "${GITHUB_PERSONAL_TOKEN}"  # Fine-grained token for personal repos
+          - "${GITHUB_ORG_A_TOKEN}"     # Fine-grained token authorized for Org A
+          - "${GITHUB_ORG_B_TOKEN}"     # Fine-grained token authorized for Org B
 ```
 
-**Note:** The tool automatically deduplicates activities, so if multiple tokens have access to the same repository, each issue/PR will only appear once in the report.
+**How Multiple Tokens Work:**
+- Each token discovers and fetches issues/PRs it has access to
+- When fetching details, the tool tries each token until one succeeds
+- This handles cases where a token can see an event but lacks repository access
+- Activities are automatically deduplicated, so each issue/PR appears only once in the report
 
 **Token Permissions:**
 - **Classic tokens:** Require `repo` scope (grants write access to all repos)
