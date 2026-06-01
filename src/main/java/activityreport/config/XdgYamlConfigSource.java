@@ -31,7 +31,7 @@ public class XdgYamlConfigSource implements ConfigSourceProvider {
             return Collections.emptyList();
         }
 
-        Path configPath = getDefaultConfigPath();
+        Path configPath = getConfigPath();
         try {
             YamlConfigSource source = new YamlConfigSource(configPath.toUri().toURL(), ORDINAL);
             Log.debugf("Loaded configuration from '%s'", configPath);
@@ -40,6 +40,18 @@ public class XdgYamlConfigSource implements ConfigSourceProvider {
             Log.debugf("Configuration file not found at %s (this is normal during initial setup)", configPath);
             return Collections.emptyList();
         }
+    }
+
+    /**
+     * Get the configuration file path.
+     * Checks for REPORT_CONFIG_PATH environment variable first, then falls back to XDG paths.
+     */
+    public static Path getConfigPath() {
+        String configPathEnv = System.getenv("REPORT_CONFIG_PATH");
+        if (configPathEnv != null && !configPathEnv.isEmpty()) {
+            return Paths.get(configPathEnv);
+        }
+        return getDefaultConfigPath();
     }
 
     /**

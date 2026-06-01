@@ -115,6 +115,11 @@
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
                     </systemPropertyVariables>
+                    <environmentVariables>
+                        <REPORT_CONFIG_PATH>${project.build.directory}/test-config/config.yaml</REPORT_CONFIG_PATH>
+                        <XDG_CONFIG_HOME>${project.build.directory}/test-config</XDG_CONFIG_HOME>
+                        <XDG_DATA_HOME>${project.build.directory}/test-data</XDG_DATA_HOME>
+                    </environmentVariables>
                 </configuration>
             </plugin>
         </plugins>

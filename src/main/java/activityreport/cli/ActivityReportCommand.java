@@ -71,10 +71,11 @@ public class ActivityReportCommand implements Runnable {
      */
     private void validateConfig() {
         if (config == null || config.providers() == null) {
+            String configPath = activityreport.config.XdgYamlConfigSource.getConfigPath().toString();
             throw new IllegalStateException(
-                "Configuration file not found. Please create a configuration file at: " +
-                activityreport.config.XdgYamlConfigSource.getDefaultConfigPath() + "\n" +
-                "See config.yaml.example for reference."
+                "Configuration file not found at: " + configPath + "\n" +
+                "See config.yaml.example for reference.\n" +
+                "You can specify a custom config location with: report --config /path/to/config.yaml"
             );
         }
         // All other validation handled by Hibernate Validator at startup
@@ -256,9 +257,16 @@ public class ActivityReportCommand implements Runnable {
     }
 
     /**
-     * Get the base output directory using XDG standards.
+     * Get the base output directory using XDG standards or REPORT_DATA_PATH override.
      */
     private Path getOutputDirectory() {
+        // Check for explicit data path override first
+        String reportDataPath = System.getenv("REPORT_DATA_PATH");
+        if (reportDataPath != null && !reportDataPath.isEmpty()) {
+            return Path.of(reportDataPath);
+        }
+
+        // Fall back to XDG standards
         String xdgDataHome = System.getenv("XDG_DATA_HOME");
         if (xdgDataHome != null && !xdgDataHome.isEmpty()) {
             return Path.of(xdgDataHome, "activity-report");

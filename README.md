@@ -38,7 +38,10 @@ UNTESTED:
 
 ## Configuration
 
-The tool follows the XDG Base Directory Specification for configuration files. Configuration is loaded automatically from:
+### Configuration File
+
+The tool follows the XDG Base Directory Specification. Configuration is loaded from:
+- `$REPORT_CONFIG_PATH` (if set - useful for testing)
 - `$XDG_CONFIG_HOME/activity-report/config.yaml` (if `XDG_CONFIG_HOME` is set)
 - `~/.config/activity-report/config.yaml` (default)
 
@@ -58,9 +61,16 @@ The tool follows the XDG Base Directory Specification for configuration files. C
    vim ~/.config/activity-report/config.yaml
    ```
 
-**Note:** The configuration file location cannot be customized via command-line options. Use the `XDG_CONFIG_HOME` environment variable if you need a non-standard location.
-
 4. **Set up API tokens** - See "Credential Management" section below.
+
+### Data Directory
+
+Reports and caches are stored in:
+- `$REPORT_DATA_PATH` (if set)
+- `$XDG_DATA_HOME/activity-report/` (if `XDG_DATA_HOME` is set)
+- `~/.local/share/activity-report/` (default)
+
+When using `--config` for testing, `--data` defaults to the current directory (PWD) to keep test data isolated.
 
 ## Credential Management
 
@@ -301,9 +311,27 @@ Options:
 - `-d, --days <N>`: Number of days to look back (default: 7)
 - `--start-date <YYYY-MM-DD>`: Start date for custom range
 - `--end-date <YYYY-MM-DD>`: End date for custom range
+- `--config <path>`: Use custom configuration file (sets `REPORT_CONFIG_PATH`)
+- `--data <path>`: Use custom data directory for reports (sets `REPORT_DATA_PATH`, defaults to PWD when --config is used)
 - `--no-ai`: Disable AI processing and use simple markdown generation
 - `-h, --help`: Show help message
 - `-V, --version`: Print version information
+
+**Testing with Custom Config:**
+
+You can use a custom configuration and data directory for testing:
+
+```bash
+# Using --config flag (recommended)
+# This automatically defaults --data to PWD to keep test data isolated
+report --config /path/to/test-config.yaml --days 7
+
+# Explicitly set data directory
+report --config /path/to/test-config.yaml --data /tmp/test-data --days 7
+
+# Or using environment variables directly
+REPORT_CONFIG_PATH=/path/to/test-config.yaml REPORT_DATA_PATH=/tmp/test-data report --days 7
+```
 
 ## Example Output
 
