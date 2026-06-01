@@ -11,15 +11,18 @@ providers:
       - name: "GitHub.com"
         url: "https://api.github.com"
         username: "your-github-username"
-        # token: "op://Private/GitHub/token"
-        # public-events-token: "op://Private/GitHub-Public-Events/token"
+        tokens:  # Multiple tokens supported (e.g., for different orgs)
+          - "op://Private/GitHub/token"
+          # - "op://Private/GitHub-Org1/token"
+          # - "op://Private/GitHub-Org2/token"
         # default-project: "Quarkus"
 
       # GitHub Enterprise (optional)
       # - name: "Company GitHub Enterprise"
       #   url: "https://github.company.com/api/v3"
       #   username: "your-ghe-username"
-      #   token: "op://Work/GitHub-Enterprise/token?account=my-work-account"
+      #   tokens:
+      #     - "op://Work/GitHub-Enterprise/token?account=my-work-account"
       #   default-project: "Infrastructure"
 
   # JIRA (supports multiple instances)

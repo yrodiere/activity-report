@@ -47,8 +47,7 @@ public interface AppConfig {
             @NotBlank String name();
             Optional<@URL String> url();
             Optional<String> username();
-            Optional<String> token();
-            Optional<String> publicEventsToken();
+            Optional<List<@NotBlank String>> tokens();
             Optional<String> defaultProject();
             Optional<List<@Valid CategoryFilter>> categoryFilters();
 

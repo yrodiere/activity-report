@@ -16,11 +16,11 @@ import java.util.*;
  * GitHub Activity Provider supporting multiple instances (GitHub.com and GitHub Enterprise)
  */
 public class GitHubProvider implements ActivityProvider {
-    private final List<GitHub> githubClients;
-    private final List<GitHub> publicGithubClients;
-    private final List<InstanceInfo> instanceInfos;
+    private final List<InstanceWithClients> instances;
 
     private record InstanceInfo(String name, String defaultProject, CategoryFilterFunction categoryFilters) {}
+
+    private record InstanceWithClients(InstanceInfo info, List<GitHub> clients) {}
 
     private static GitHub createGitHubClient(String url, String token) throws IOException {
         GitHubBuilder builder = new GitHubBuilder();
@@ -41,46 +41,47 @@ public class GitHubProvider implements ActivityProvider {
     }
 
     public GitHubProvider(AppConfig config, UrlExtractor urlExtractor) {
-        this.githubClients = new ArrayList<>();
-        this.publicGithubClients = new ArrayList<>();
-        this.instanceInfos = new ArrayList<>();
+        this.instances = new ArrayList<>();
 
         config.providers().github().ifPresent(github -> {
             if (github.enabled() && github.instances() != null) {
                 for (var instance : github.instances()) {
                     try {
                         String apiUrl = instance.url().orElse("https://api.github.com");
+                        List<String> tokens = instance.tokens().orElse(List.of());
 
-                        GitHub client = createGitHubClient(
-                            apiUrl,
-                            instance.token().orElse(null)
-                        );
-                        githubClients.add(client);
+                        if (tokens.isEmpty()) {
+                            Log.warnf("No tokens configured for GitHub instance %s, skipping", instance.name());
+                            continue;
+                        }
 
-                        // Create public events client if token is configured
-                        GitHub publicClient = null;
-                        if (instance.publicEventsToken().isPresent()) {
+                        List<GitHub> clients = new ArrayList<>();
+                        for (String token : tokens) {
                             try {
-                                publicClient = createGitHubClient(
-                                    apiUrl,
-                                    instance.publicEventsToken().get()
-                                );
+                                GitHub client = createGitHubClient(apiUrl, token);
+                                clients.add(client);
                             } catch (IOException e) {
-                                Log.warnf("Failed to initialize public events client for GitHub instance %s: %s",
+                                Log.warnf("Failed to initialize GitHub client for instance %s with token: %s",
                                     instance.name(), e.getMessage());
                             }
                         }
-                        publicGithubClients.add(publicClient);
 
-                        instanceInfos.add(new InstanceInfo(
+                        if (clients.isEmpty()) {
+                            Log.warnf("No valid clients created for GitHub instance %s, skipping", instance.name());
+                            continue;
+                        }
+
+                        InstanceInfo info = new InstanceInfo(
                             instance.name(),
                             instance.defaultProject().orElse(null),
                             new CategoryFilterFunction(instance.categoryFilters().orElse(List.of()))
-                        ));
+                        );
+
+                        instances.add(new InstanceWithClients(info, clients));
 
                         // Register this instance for URL extraction
                         urlExtractor.registerGitHubInstance(apiUrl, instance.name());
-                    } catch (IOException e) {
+                    } catch (Exception e) {
                         Log.warnf("Failed to initialize GitHub instance %s: %s", instance.name(), e.getMessage());
                     }
                 }
@@ -95,66 +96,66 @@ public class GitHubProvider implements ActivityProvider {
 
     @Override
     public boolean isConfigured() {
-        return !githubClients.isEmpty();
+        return !instances.isEmpty();
     }
 
     @Override
     public List<Activity> fetchActivities(Instant startDate, Instant endDate, UrlExtractor urlExtractor) throws Exception {
         List<Activity> allActivities = new ArrayList<>();
 
-        for (int i = 0; i < githubClients.size(); i++) {
-            GitHub github = githubClients.get(i);
-            GitHub publicGitHub = publicGithubClients.get(i);
-            InstanceInfo instanceInfo = instanceInfos.get(i);
+        for (InstanceWithClients instanceWithClients : instances) {
+            InstanceInfo instanceInfo = instanceWithClients.info;
+            List<GitHub> clients = instanceWithClients.clients;
             String instanceName = instanceInfo.name;
 
             try {
-                Log.infof("Fetching activities from GitHub instance: %s", instanceName);
+                Log.infof("Fetching activities from GitHub instance: %s (%d token(s))", instanceName, clients.size());
 
-                GHUser currentUser = github.getMyself();
-                String currentLogin = currentUser.getLogin();
-
-                // Step 1: Use events API to discover issues/PRs
+                // Step 1: Use events API to discover issues/PRs across all tokens
                 Map<IssueRef, IssueRefWithClient> issueRefs = new HashMap<>();
                 Map<IssueRef, IssueRefWithClient> prRefs = new HashMap<>();
 
-                // Process authenticated events (filtered by token scope)
-                Log.tracef("Fetching authenticated events for user %s", currentLogin);
-                PagedIterable<GHEventInfo> authenticatedEvents = currentUser.listEvents();
-                processEvents("authenticated", github, authenticatedEvents, issueRefs, prRefs, startDate, endDate);
+                for (int tokenIndex = 0; tokenIndex < clients.size(); tokenIndex++) {
+                    GitHub github = clients.get(tokenIndex);
+                    String tokenLabel = clients.size() > 1 ? String.format("token %d/%d", tokenIndex + 1, clients.size()) : "token";
 
-                // Process public events (unfiltered, to work around fine-grained token limitations)
-                // Only if publicEventsToken is configured to avoid rate limiting issues
-                if (publicGitHub != null) {
                     try {
-                        Log.tracef("Fetching public events for user %s (using publicEventsToken)", currentLogin);
-                        List<GHEventInfo> publicEventsList = publicGitHub.getUserPublicEvents(currentLogin);
-                        processEvents("public", publicGitHub, publicEventsList, issueRefs, prRefs, startDate, endDate);
-                    } catch (org.kohsuke.github.HttpException e) {
-                        // Check for rate limit error (403 or 429 status codes)
-                        int responseCode = e.getResponseCode();
-                        String message = e.getMessage();
-                        if (responseCode == 403 || responseCode == 429 ||
-                            (message != null && message.toLowerCase().contains("rate limit"))) {
-                            Log.warnf("Cannot use public events API with configured publicEventsToken due to rate limits. " +
-                                "Some activities from organizations not accessible by your main token may be missing.");
-                        } else {
-                            Log.warnf("Failed to fetch public events: %s", message);
+                        GHUser currentUser = github.getMyself();
+                        String currentLogin = currentUser.getLogin();
+
+                        // Process authenticated events (filtered by token scope)
+                        Log.tracef("Fetching authenticated events for user %s (%s)", currentLogin, tokenLabel);
+                        PagedIterable<GHEventInfo> authenticatedEvents = currentUser.listEvents();
+                        processEvents(String.format("authenticated (%s)", tokenLabel), github, authenticatedEvents, issueRefs, prRefs, startDate, endDate);
+
+                        // Process public events to work around fine-grained token limitations
+                        try {
+                            Log.tracef("Fetching public events for user %s (%s)", currentLogin, tokenLabel);
+                            List<GHEventInfo> publicEventsList = github.getUserPublicEvents(currentLogin);
+                            processEvents(String.format("public (%s)", tokenLabel), github, publicEventsList, issueRefs, prRefs, startDate, endDate);
+                        } catch (org.kohsuke.github.HttpException e) {
+                            int responseCode = e.getResponseCode();
+                            String message = e.getMessage();
+                            if (responseCode == 403 || responseCode == 429 ||
+                                (message != null && message.toLowerCase().contains("rate limit"))) {
+                                Log.debugf("Public events API rate limited for %s, continuing with authenticated events only", tokenLabel);
+                            } else {
+                                Log.warnf("Failed to fetch public events for %s: %s", tokenLabel, message);
+                            }
+                        } catch (IOException e) {
+                            Log.debugf("Failed to fetch public events for %s: %s", tokenLabel, e.getMessage());
                         }
-                    } catch (IOException e) {
-                        Log.warnf("Failed to fetch public events: %s", e.getMessage());
+                    } catch (Exception e) {
+                        Log.warnf("Error processing %s for instance %s: %s", tokenLabel, instanceName, e.getMessage());
                     }
-                } else {
-                    Log.debugf("Skipping public events API (no publicEventsToken configured). " +
-                        "If using a fine-grained token, some activities from organizations not accessible by your token may be missing.");
                 }
 
-                Log.tracef("After processing all events: Found %d issues, %d PRs", issueRefs.size(), prRefs.size());
+                Log.tracef("After processing all tokens: Found %d issues, %d PRs", issueRefs.size(), prRefs.size());
 
                 // Step 2: Fetch full details for each unique issue/PR
                 int beforeCount = allActivities.size();
-                allActivities.addAll(fetchIssueOrPRDetails(IssueType.ISSUE, instanceInfo, currentLogin, issueRefs, startDate, endDate, urlExtractor));
-                allActivities.addAll(fetchIssueOrPRDetails(IssueType.PULL_REQUEST, instanceInfo, currentLogin, prRefs, startDate, endDate, urlExtractor));
+                allActivities.addAll(fetchIssueOrPRDetails(IssueType.ISSUE, instanceInfo, issueRefs, startDate, endDate, urlExtractor));
+                allActivities.addAll(fetchIssueOrPRDetails(IssueType.PULL_REQUEST, instanceInfo, prRefs, startDate, endDate, urlExtractor));
                 int foundCount = allActivities.size() - beforeCount;
 
                 Log.infof("Found %d activities from GitHub instance: %s", foundCount, instanceName);
@@ -438,7 +439,7 @@ public class GitHubProvider implements ActivityProvider {
      * Fetch details for issues or pull requests.
      * Unified method to avoid code duplication between issues and PRs.
      */
-    private List<Activity> fetchIssueOrPRDetails(IssueType type, InstanceInfo instanceInfo, String currentLogin,
+    private List<Activity> fetchIssueOrPRDetails(IssueType type, InstanceInfo instanceInfo,
                                                  Map<IssueRef, IssueRefWithClient> refs, Instant startDate,
                                                  Instant endDate, UrlExtractor urlExtractor) {
         List<Activity> activities = new ArrayList<>();
@@ -470,9 +471,11 @@ public class GitHubProvider implements ActivityProvider {
                 ActionCategory actionCategory;
                 if (type == IssueType.PULL_REQUEST) {
                     GHPullRequest finalPr = pr; // Capture for lambda
+                    GitHub finalGithub = github; // Capture for lambda
                     actionCategory = instanceInfo.categoryFilters.matchPullRequest(finalPr)
                         .orElseGet(() -> {
                             try {
+                                String currentLogin = finalGithub.getMyself().getLogin();
                                 boolean isAuthor = finalPr.getUser().getLogin().equals(currentLogin);
                                 return isAuthor ? ActionCategory.CODE : ActionCategory.REVIEW;
                             } catch (Exception e) {
