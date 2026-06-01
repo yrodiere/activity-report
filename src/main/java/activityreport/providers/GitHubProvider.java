@@ -328,35 +328,74 @@ public class GitHubProvider implements ActivityProvider {
             eventSource, eventCount, earliestEventInfo, newIssues, newPRs);
     }
 
+    /**
+     * Extract repository owner/name from issue or PR URL.
+     * Handles both HTML URLs (https://github.com/owner/repo/issues/123)
+     * and API URLs (https://api.github.com/repos/owner/repo/issues/123 or
+     * https://api.github.ibm.com/api/v3/repos/owner/repo/issues/123 for GHE)
+     */
+    private String extractRepoFromUrl(java.net.URL url) {
+        if (url == null) return null;
+        try {
+            String path = url.getPath();
+            String[] parts = path.split("/");
+
+            // Find "repos" in the path (handles both GitHub.com and GHE)
+            // API URL: /repos/owner/repo/... or /api/v3/repos/owner/repo/...
+            for (int i = 0; i < parts.length; i++) {
+                if ("repos".equals(parts[i]) && i + 2 < parts.length) {
+                    return parts[i + 1] + "/" + parts[i + 2];
+                }
+            }
+
+            // Fallback: HTML URL format /owner/repo/...
+            if (parts.length >= 3) {
+                return parts[1] + "/" + parts[2];
+            }
+        } catch (Exception e) {
+            Log.tracef("Failed to extract repo from URL %s: %s", url, e.getMessage());
+        }
+        return null;
+    }
+
     private void extractReferences(GitHub github, GHEventInfo event, Instant eventTimestamp,
                                    Map<IssueRef, IssueRefWithClients> issueRefs, Map<IssueRef, IssueRefWithClients> prRefs) throws IOException {
-        // Get repository name from event, not from issue/PR objects
-        // This avoids triggering API calls with the wrong token
-        GHRepository eventRepo = event.getRepository();
-        if (eventRepo == null) {
-            return;
-        }
-        String repoFullName = eventRepo.getFullName();
+        // Extract repository name from issue/PR URLs
+        // Use getUrl() instead of getHtmlUrl() as it's more reliably populated
+        // payload.getRepository() is always null in the GitHub API library
+        // issue.getRepository() and pr.getRepository() trigger API calls which may fail
 
         switch (event.getType()) {
             case ISSUES -> {
                 var payload = event.getPayload(GHEventPayload.Issue.class);
-                if (payload != null && payload.getIssue() != null) {
-                    var issue = payload.getIssue();
-                    IssueRef ref = new IssueRef(repoFullName, issue.getNumber());
-                    addOrUpdateRef(ref, eventTimestamp, github, issueRefs, "issue");
+                if (payload == null || payload.getIssue() == null) {
+                    return;
                 }
+                var issue = payload.getIssue();
+                String repoFullName = extractRepoFromUrl(issue.getUrl());
+                if (repoFullName == null) {
+                    Log.tracef("  -> Cannot extract repository from issue URL: %s", issue.getUrl());
+                    return;
+                }
+                IssueRef ref = new IssueRef(repoFullName, issue.getNumber());
+                addOrUpdateRef(ref, eventTimestamp, github, issueRefs, "issue");
             }
             case ISSUE_COMMENT -> {
                 var payload = event.getPayload(GHEventPayload.IssueComment.class);
-                if (payload != null && payload.getIssue() != null) {
-                    var issue = payload.getIssue();
-                    IssueRef ref = new IssueRef(repoFullName, issue.getNumber());
-                    if (issue.isPullRequest()) {
-                        addOrUpdateRef(ref, eventTimestamp, github, prRefs, "PR (from comment)");
-                    } else {
-                        addOrUpdateRef(ref, eventTimestamp, github, issueRefs, "issue (from comment)");
-                    }
+                if (payload == null || payload.getIssue() == null) {
+                    return;
+                }
+                var issue = payload.getIssue();
+                String repoFullName = extractRepoFromUrl(issue.getUrl());
+                if (repoFullName == null) {
+                    Log.tracef("  -> Cannot extract repository from issue URL: %s", issue.getUrl());
+                    return;
+                }
+                IssueRef ref = new IssueRef(repoFullName, issue.getNumber());
+                if (issue.isPullRequest()) {
+                    addOrUpdateRef(ref, eventTimestamp, github, prRefs, "PR (from comment)");
+                } else {
+                    addOrUpdateRef(ref, eventTimestamp, github, issueRefs, "issue (from comment)");
                 }
             }
             case PULL_REQUEST, PULL_REQUEST_REVIEW, PULL_REQUEST_REVIEW_COMMENT -> {
@@ -371,10 +410,16 @@ public class GitHubProvider implements ActivityProvider {
                     var payload = event.getPayload(GHEventPayload.PullRequestReviewComment.class);
                     if (payload != null) pr = payload.getPullRequest();
                 }
-                if (pr != null) {
-                    IssueRef ref = new IssueRef(repoFullName, pr.getNumber());
-                    addOrUpdateRef(ref, eventTimestamp, github, prRefs, "PR");
+                if (pr == null) {
+                    return;
                 }
+                String repoFullName = extractRepoFromUrl(pr.getUrl());
+                if (repoFullName == null) {
+                    Log.tracef("  -> Cannot extract repository from PR URL: %s", pr.getUrl());
+                    return;
+                }
+                IssueRef ref = new IssueRef(repoFullName, pr.getNumber());
+                addOrUpdateRef(ref, eventTimestamp, github, prRefs, "PR");
             }
         }
     }
