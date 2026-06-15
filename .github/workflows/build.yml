@@ -25,5 +25,8 @@ jobs:
           distribution: temurin
           java-version: 25
 
+      - name: Print PR info
+        run: echo "Building PR ${{ github.event.pull_request.title }}"
+
       - name: Build
         run: mvn -B clean verify

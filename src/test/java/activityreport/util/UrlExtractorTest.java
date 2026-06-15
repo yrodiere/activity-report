@@ -21,7 +21,7 @@ class UrlExtractorTest {
 
         assertThat(urls).containsExactlyInAnyOrder(
             "https://github.com/owner/repo/pull/123",
-            "https://github.com/other/proj/pull/456");
+            "https://github.com/other/proj/pull/789");
     }
 
     @Test
