@@ -100,14 +100,13 @@ public class MarkdownReportGenerator {
 
         // Primary activity line with link
         if (primary.url() != null && !primary.url().isEmpty()) {
-            report.append(String.format("* [%s](%s)", primary.title(), primary.url()));
+            report.append(String.format("* [%s](%s)\n", primary.title(), primary.url()));
         } else {
-            report.append(String.format("* %s", primary.title()));
+            report.append(String.format("* %s\n", primary.title()));
         }
 
         // Add description if present
         if (primary.description() != null && !primary.description().isEmpty()) {
-            report.append("\n");
             String[] lines = primary.description().split("\n");
             for (String line : lines) {
                 line = line.trim();
@@ -118,19 +117,12 @@ public class MarkdownReportGenerator {
         }
 
         // Add secondary activities as nested list items
-        if (!group.secondary().isEmpty()) {
-            if (primary.description() == null || primary.description().isEmpty()) {
-                report.append("\n");
-            }
-            for (Activity secondary : group.secondary()) {
-                if (secondary.url() != null && !secondary.url().isEmpty()) {
-                    report.append(String.format("    * [%s](%s)\n", secondary.title(), secondary.url()));
-                } else {
-                    report.append(String.format("    * %s\n", secondary.title()));
-                }
+        for (Activity secondary : group.secondary()) {
+            if (secondary.url() != null && !secondary.url().isEmpty()) {
+                report.append(String.format("    * [%s](%s)\n", secondary.title(), secondary.url()));
+            } else {
+                report.append(String.format("    * %s\n", secondary.title()));
             }
         }
-
-        report.append("\n");
     }
 }
