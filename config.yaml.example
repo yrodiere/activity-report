@@ -14,6 +14,9 @@ providers:
           - "op://Private/GitHub/token"
           # - "op://Private/GitHub-Org1/token"
           # - "op://Private/GitHub-Org2/token"
+        # users:  # GitHub logins to track (defaults to token owner)
+        #   - "your-username"
+        #   - "your-agent-username"
         # default-project: "Quarkus"
 
       # GitHub Enterprise (optional)

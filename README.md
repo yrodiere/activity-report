@@ -186,6 +186,26 @@ providers:
           - "op://Private/GitHub/org-b-token"     # Org B private repos
 ```
 
+**Tracking Other Users' Activity**
+
+By default, the tool tracks the activity of the user who owns each token. You can override this by specifying explicit GitHub logins with the `users` option. This is useful when you want to include activity from other accounts, such as AI agent accounts:
+
+```yaml
+providers:
+  github:
+    instances:
+      - name: "GitHub.com"
+        tokens:
+          - "op://Private/GitHub/personal-token"
+        users:
+          - "your-username"
+          - "your-agent-username"
+```
+
+When `users` is set, events are fetched for those users instead of the token owner. The token only needs to be able to view the relevant repositories — it doesn't need to belong to the tracked users. Note that for users other than the token owner, only public events are visible through the GitHub API; private repository events require a token owned by that user.
+
+If `users` is omitted, the tool uses the token owner (current behavior).
+
 #### JIRA
 
 **JIRA Cloud:**
