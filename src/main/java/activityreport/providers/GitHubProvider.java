@@ -115,7 +115,8 @@ public class GitHubProvider implements ActivityProvider {
                 // Step 1: Use events API to discover issues/PRs across all tokens
                 Map<IssueRef, IssueRefWithClients> issueRefs = new HashMap<>();
                 Map<IssueRef, IssueRefWithClients> prRefs = new HashMap<>();
-                Set<String> userLogins = new LinkedHashSet<>();
+                Set<String> userLogins = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+                userLogins.addAll(instanceInfo.configuredUsers);
 
                 for (int tokenIndex = 0; tokenIndex < clients.size(); tokenIndex++) {
                     GitHub github = clients.get(tokenIndex);
