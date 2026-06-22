@@ -125,52 +125,31 @@ class SimpleGrouperTest {
     }
 
     @Test
-    void testPrimaryPrefersCodeTargetingDefaultBranch() {
+    void testGroupSortingPrefersCodeTargetingDefaultBranch() {
+        String sharedUrl = "https://github.com/repo/issues/99";
+
+        Activity discuss = new Activity(
+            "GitHub",
+            "issue",
+            ActionCategory.DISCUSS,
+            "Discussion",
+            "",
+            "https://github.com/repo/issues/10",
+            Instant.now(),
+            List.of(sharedUrl)
+        );
+
         Activity prFeatureBranch = new Activity(
             "GitHub",
             "pull_request",
             ActionCategory.CODE,
             "Backport fix to 1.x",
-            "Description",
+            "",
             "https://github.com/repo/pull/100",
             Instant.now(),
-            List.of("https://github.com/repo/pull/200"),
+            List.of(sharedUrl),
             null,
             new HashMap<>(Map.of())
-        );
-
-        Activity prDefaultBranch = new Activity(
-            "GitHub",
-            "pull_request",
-            ActionCategory.CODE,
-            "Add feature X",
-            "Description",
-            "https://github.com/repo/pull/200",
-            Instant.now(),
-            List.of("https://github.com/repo/pull/100"),
-            null,
-            new HashMap<>(Map.of("targetsDefaultBranch", true))
-        );
-
-        // Even though prFeatureBranch comes first, the one targeting default branch should be primary
-        List<ActivityGroup> groups = SimpleGrouper.groupActivities(List.of(prFeatureBranch, prDefaultBranch));
-
-        assertThat(groups).hasSize(1);
-        assertThat(groups.get(0).primary()).isSameAs(prDefaultBranch);
-        assertThat(groups.get(0).secondary()).containsExactly(prFeatureBranch);
-    }
-
-    @Test
-    void testPrimaryFallsBackToAnyCodeWhenNoneTargetDefaultBranch() {
-        Activity pr1 = new Activity(
-            "GitHub",
-            "pull_request",
-            ActionCategory.CODE,
-            "Backport fix to 1.x",
-            "Description",
-            "https://github.com/repo/pull/100",
-            Instant.now(),
-            List.of("https://github.com/repo/pull/200")
         );
 
         Activity review = new Activity(
@@ -178,16 +157,66 @@ class SimpleGrouperTest {
             "review",
             ActionCategory.REVIEW,
             "Reviewed PR",
-            "Description",
-            "https://github.com/repo/pull/200",
+            "",
+            "https://github.com/repo/pull/200#review-1",
             Instant.now(),
-            List.of("https://github.com/repo/pull/100")
+            List.of(sharedUrl)
         );
 
-        List<ActivityGroup> groups = SimpleGrouper.groupActivities(List.of(review, pr1));
+        Activity prDefaultBranch = new Activity(
+            "GitHub",
+            "pull_request",
+            ActionCategory.CODE,
+            "Add feature X",
+            "",
+            "https://github.com/repo/pull/200",
+            Instant.now(),
+            List.of(sharedUrl),
+            null,
+            new HashMap<>(Map.of("targetsDefaultBranch", true))
+        );
+
+        // Pass in reverse priority order to verify sorting overrides input order
+        List<ActivityGroup> groups = SimpleGrouper.groupActivities(
+            List.of(discuss, prFeatureBranch, review, prDefaultBranch));
 
         assertThat(groups).hasSize(1);
-        assertThat(groups.get(0).primary()).isSameAs(pr1);
+        assertThat(groups.get(0).primary()).isSameAs(prDefaultBranch);
+        assertThat(groups.get(0).secondary())
+            .containsExactly(prFeatureBranch, review, discuss);
+    }
+
+    @Test
+    void testGroupSortingFallsBackToCodeWhenNoneTargetDefaultBranch() {
+        String sharedUrl = "https://github.com/repo/issues/99";
+
+        Activity review = new Activity(
+            "GitHub",
+            "review",
+            ActionCategory.REVIEW,
+            "Reviewed PR",
+            "",
+            "https://github.com/repo/pull/200#review-1",
+            Instant.now(),
+            List.of(sharedUrl)
+        );
+
+        Activity pr = new Activity(
+            "GitHub",
+            "pull_request",
+            ActionCategory.CODE,
+            "Backport fix to 1.x",
+            "",
+            "https://github.com/repo/pull/100",
+            Instant.now(),
+            List.of(sharedUrl)
+        );
+
+        List<ActivityGroup> groups = SimpleGrouper.groupActivities(List.of(review, pr));
+
+        assertThat(groups).hasSize(1);
+        assertThat(groups.get(0).primary()).isSameAs(pr);
+        assertThat(groups.get(0).secondary()).containsExactly(review);
     }
 
     @Test
