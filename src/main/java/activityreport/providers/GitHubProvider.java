@@ -651,6 +651,19 @@ public class GitHubProvider implements ActivityProvider {
                         contentUrls
                     );
 
+                    if (type == IssueType.PULL_REQUEST && pr != null) {
+                        try {
+                            String baseBranch = pr.getBase().getRef();
+                            String defaultBranch = repo.getDefaultBranch();
+                            if (baseBranch != null && baseBranch.equals(defaultBranch)) {
+                                activity.addMetadata("targetsDefaultBranch", true);
+                            }
+                        } catch (Exception e) {
+                            Log.tracef("Failed to determine default branch for %s#%d: %s",
+                                ref.repoFullName, ref.number, e.getMessage());
+                        }
+                    }
+
                     // Add default project if configured
                     if (instanceInfo.defaultProject != null) {
                         activity.addMetadata("defaultProject", instanceInfo.defaultProject);

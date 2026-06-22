@@ -4,11 +4,24 @@ import activityreport.model.ActionCategory;
 import activityreport.model.Activity;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Simple URL-based activity grouper (fallback when AI is not available)
  */
 public class SimpleGrouper {
+
+    private static int activityPriorityRank(Activity a) {
+        return switch (a.actionCategory()) {
+            case CODE -> Boolean.TRUE.equals(a.metadata().get("targetsDefaultBranch")) ? 0 : 1;
+            case REVIEW -> 2;
+            case DISCUSS -> 3;
+            case CHORE -> 4;
+        };
+    }
+
+    private static final Comparator<Activity> ACTIVITY_PRIORITY =
+        Comparator.comparingInt(SimpleGrouper::activityPriorityRank);
 
     public static List<ActivityGroup> groupActivities(List<Activity> activities) {
         // Build URL -> Activities map
@@ -64,26 +77,11 @@ public class SimpleGrouper {
                 continue;
             }
 
-            // Pick primary: prefer CODE > REVIEW > DISCUSS > CHORE
-            Activity primary = groupSet.stream()
-                .filter(a -> a.actionCategory() == ActionCategory.CODE)
-                .findFirst()
-                .or(() -> groupSet.stream()
-                    .filter(a -> a.actionCategory() == ActionCategory.REVIEW)
-                    .findFirst())
-                .or(() -> groupSet.stream()
-                    .filter(a -> a.actionCategory() == ActionCategory.DISCUSS)
-                    .findFirst())
-                .or(() -> groupSet.stream()
-                    .filter(a -> a.actionCategory() == ActionCategory.CHORE)
-                    .findFirst())
-                .orElse(groupSet.iterator().next());
+            List<Activity> sorted = groupSet.stream()
+                .sorted(ACTIVITY_PRIORITY)
+                .collect(Collectors.toCollection(ArrayList::new));
 
-            // Secondary: all others
-            List<Activity> secondary = new ArrayList<>(groupSet);
-            secondary.remove(primary);
-
-            groups.add(new ActivityGroup(primary, secondary));
+            groups.add(new ActivityGroup(sorted.removeFirst(), sorted));
         }
 
         // Add ungrouped activities as single-item groups
