@@ -607,6 +607,9 @@ public class GitHubProvider implements ActivityProvider {
                     if (type == IssueType.PULL_REQUEST) {
                         // Extract external URLs from review bodies
                         for (GHPullRequestReview review : pr.listReviews()) {
+                            if (review.getSubmittedAt() == null) {
+                                continue;
+                            }
                             Instant reviewDate = review.getSubmittedAt().toInstant();
                             if (!reviewDate.isBefore(startDate) && !reviewDate.isAfter(endDate)) {
                                 String reviewBody = review.getBody();
