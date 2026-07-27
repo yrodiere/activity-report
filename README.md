@@ -13,8 +13,7 @@ A command-line tool that generates intelligent activity reports from multiple so
 
 UNTESTED:
 
-- **AI-Powered Enrichment**: Uses local AI (via Podman AI Lab) to add descriptions and assign projects to activities
-- **Fallback Mode**: Works without AI using simple URL-based grouping
+- **AI-Powered Enrichment**: Uses local AI (via Podman AI Lab) to add descriptions and assign projects to activities. If no local model is available, falls back to using simple URL-based grouping
 
 ## Prerequisites
 
@@ -157,15 +156,7 @@ export ZULIP_API_KEY="xxxxxxxxxxxxx"
 
 You have two main options for GitHub authentication:
 
-**Option 1: Classic Token (Full Access)**
-1. Go to https://github.com/settings/tokens
-2. Click "Generate new token (classic)"
-3. Select scopes: `repo`, `read:user`, `user:email`
-4. Copy token and store in 1Password or as environment variable
-
-Note: The `repo` scope grants READ+WRITE access to all accessible repositories.
-
-**Option 2: Fine-Grained Token (Recommended for Security)**
+**Option 1: Fine-Grained Token (Recommended for Security)**
 1. Go to https://github.com/settings/personal-access-tokens/new
 2. Set repository access and permissions:
    - Repository access: Choose specific repos or "All repositories"
@@ -173,7 +164,15 @@ Note: The `repo` scope grants READ+WRITE access to all accessible repositories.
 3. For organization private repos: Token must be authorized by the organization
 4. Copy token and store securely
 
-Note: Fine-grained tokens are READ-ONLY but filter events based on token scope. For work spanning multiple organizations, you can configure multiple tokens (see "Multiple Tokens per Instance" below).
+NOTE: Fine-grained tokens are READ-ONLY but filter events based on token scope. For work spanning multiple organizations, you can configure multiple tokens (see "Multiple Tokens per Instance" below).
+
+**Option 2: Classic Token (DANGEROUS)**
+1. Go to https://github.com/settings/tokens
+2. Click "Generate new token (classic)"
+3. Select scopes: `repo`, `read:user`, `user:email`
+4. Copy token and store in 1Password or as environment variable
+
+WARNING: The `repo` scope grants READ+WRITE access to all accessible repositories.
 
 **Multiple Tokens per Instance**
 
