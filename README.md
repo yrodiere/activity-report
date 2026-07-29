@@ -594,7 +594,9 @@ To add a new activity provider:
 
 ## License
 
-[Your chosen license]
+Apache Software License, v2.
+
+See the LICENSE file at the root of this repository.
 
 ## Contributing
 
