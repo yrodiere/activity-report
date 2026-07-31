@@ -277,7 +277,7 @@ report -d 30
 ### Custom Date Range
 
 ```bash
-report --start-date 2024-02-01 --end-date 2024-02-15
+report --start 2024-02-01 --end 2024-02-15
 ```
 
 ### Disable AI Processing
@@ -308,8 +308,8 @@ report --help
 
 Options:
 - `-d, --days <N>`: Number of days to look back (default: 7)
-- `--start-date <YYYY-MM-DD>`: Start date for custom range
-- `--end-date <YYYY-MM-DD>`: End date for custom range
+- `--start <YYYY-MM-DD>`: Start date for custom range
+- `--end <YYYY-MM-DD>`: End date for custom range
 - `--config <path>`: Use custom configuration file (sets `REPORT_CONFIG_PATH`)
 - `--data <path>`: Use custom data directory for reports (sets `REPORT_DATA_PATH`, defaults to PWD when --config is used)
 - `--no-ai`: Disable AI processing and use simple markdown generation

@@ -69,10 +69,10 @@ public class ActivityReportCommand implements Runnable {
     @Option(names = {"-d", "--days"}, description = "Number of days to look back (default: 7)")
     private int days = 7;
 
-    @Option(names = {"--start-date"}, description = "Start date (ISO format: YYYY-MM-DD)")
+    @Option(names = {"--start"}, description = "Start date (ISO format: YYYY-MM-DD)")
     private String startDateStr;
 
-    @Option(names = {"--end-date"}, description = "End date (ISO format: YYYY-MM-DD)")
+    @Option(names = {"--end"}, description = "End date (ISO format: YYYY-MM-DD)")
     private String endDateStr;
 
     @Option(names = {"--no-ai"}, description = "Disable AI processing and use simple markdown generation")
@@ -109,13 +109,15 @@ public class ActivityReportCommand implements Runnable {
 
             // Determine date range
             Instant startDate, endDate;
-            if (startDateStr != null && endDateStr != null) {
-                startDate = LocalDate.parse(startDateStr).atStartOfDay(ZoneId.systemDefault()).toInstant();
+            if (endDateStr != null) {
                 endDate = LocalDate.parse(endDateStr).atTime(LocalTime.MAX).atZone(ZoneId.systemDefault()).toInstant();
             } else {
-                ZonedDateTime endDateZoned = Instant.now().atZone(ZoneId.systemDefault()).with(LocalTime.MAX);
-                endDate = endDateZoned.toInstant();
-                startDate = endDateZoned.minus(Duration.ofDays(days)).with(LocalTime.MIN).toInstant();
+                endDate = Instant.now().atZone(ZoneId.systemDefault()).with(LocalTime.MAX).toInstant();
+            }
+            if (startDateStr != null) {
+                startDate = LocalDate.parse(startDateStr).atStartOfDay(ZoneId.systemDefault()).toInstant();
+            } else {
+                startDate = endDate.atZone(ZoneId.systemDefault()).minus(Duration.ofDays(days)).with(LocalTime.MIN).toInstant();
             }
 
             DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneId.systemDefault());
