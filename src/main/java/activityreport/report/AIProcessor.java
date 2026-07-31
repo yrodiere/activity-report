@@ -5,6 +5,7 @@ import activityreport.client.TraceClientLogger;
 import activityreport.config.AppConfig;
 import org.jboss.resteasy.reactive.client.api.LoggingScope;
 import activityreport.model.Activity;
+import activityreport.util.ProgressLog;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -57,7 +58,7 @@ public class AIProcessor {
         }
 
         if (this.modelName != null) {
-            Log.infof("Using AI model: %s", this.modelName);
+            ProgressLog.info("Using AI model: %s", this.modelName);
         }
     }
 
@@ -67,11 +68,11 @@ public class AIProcessor {
             var data = root.get("data");
             if (data != null && data.isArray() && !data.isEmpty()) {
                 var model = data.get(0).get("id").asText();
-                Log.infof("Auto-detected AI model: %s", model);
+                ProgressLog.detail("Auto-detected AI model: %s", model);
                 return model;
             }
         } catch (Exception e) {
-            Log.warnf("Could not auto-detect AI model: %s", e.getMessage());
+            ProgressLog.warn("Could not auto-detect AI model: %s", e.getMessage());
         }
         return null;
     }
@@ -90,7 +91,7 @@ public class AIProcessor {
         }
 
         try {
-            Log.info("AI: Enriching activities with descriptions and projects...");
+            ProgressLog.section("AI: Enriching activities with descriptions and projects...");
 
             // Prepare request
             List<Map<String, Object>> activitiesJson = new ArrayList<>();
@@ -193,14 +194,14 @@ public class AIProcessor {
                 }
             }
 
-            Log.infof("AI: Enriched %d descriptions and %d projects",
+            ProgressLog.result("AI: Enriched %d descriptions and %d projects",
                 enrichments.has("descriptions") ? enrichments.get("descriptions").size() : 0,
                 enrichments.has("projects") ? enrichments.get("projects").size() : 0);
 
             return enriched;
 
         } catch (Exception e) {
-            Log.warnf("AI enrichment failed: %s", e.getMessage());
+            ProgressLog.warn("AI enrichment failed: %s", e.getMessage());
             return activities;
         }
     }
@@ -215,7 +216,7 @@ public class AIProcessor {
         }
 
         try {
-            Log.info("AI: Grouping related activities...");
+            ProgressLog.section("AI: Grouping related activities...");
 
             // Prepare request
             List<Map<String, Object>> activitiesJson = new ArrayList<>();
@@ -301,12 +302,12 @@ public class AIProcessor {
                 }
             }
 
-            Log.infof("AI: Created %d groups from %d activities", groups.size(), activities.size());
+            ProgressLog.result("AI: Created %d groups from %d activities", groups.size(), activities.size());
 
             return groups;
 
         } catch (Exception e) {
-            Log.warnf("AI grouping failed: %s", e.getMessage());
+            ProgressLog.warn("AI grouping failed: %s", e.getMessage());
             return SimpleGrouper.groupActivities(activities);
         }
     }

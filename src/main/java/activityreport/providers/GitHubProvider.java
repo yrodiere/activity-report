@@ -4,6 +4,7 @@ import activityreport.config.AppConfig;
 import activityreport.model.ActionCategory;
 import activityreport.model.Activity;
 import activityreport.model.ActivityProvider;
+import activityreport.util.ProgressLog;
 import activityreport.util.UrlExtractor;
 import io.quarkus.logging.Log;
 import org.kohsuke.github.*;
@@ -110,84 +111,83 @@ public class GitHubProvider implements ActivityProvider {
             String instanceName = instanceInfo.name;
 
             try {
-                Log.infof("Fetching activities from GitHub instance: %s (%d token(s))", instanceName, clients.size());
-
-                // Step 1: Use events API to discover issues/PRs across all tokens
-                Map<IssueRef, IssueRefWithClients> issueRefs = new HashMap<>();
-                Map<IssueRef, IssueRefWithClients> prRefs = new HashMap<>();
-                Set<String> userLogins = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-                userLogins.addAll(instanceInfo.configuredUsers);
-
-                for (int tokenIndex = 0; tokenIndex < clients.size(); tokenIndex++) {
-                    GitHub github = clients.get(tokenIndex);
-                    String tokenLabel = clients.size() > 1 ? String.format("token %d/%d", tokenIndex + 1, clients.size()) : "token";
-
-                    try {
-                        // Determine which users to fetch events for:
-                        // configured users if set, otherwise the token owner.
-                        Map<String, GHUser> usersForToken = new LinkedHashMap<>();
-                        if (!instanceInfo.configuredUsers.isEmpty()) {
-                            for (String login : instanceInfo.configuredUsers) {
-                                usersForToken.put(login, github.getUser(login));
-                            }
-                        } else {
-                            GHUser myself = github.getMyself();
-                            usersForToken.put(myself.getLogin(), myself);
-                        }
-
-                        for (var entry : usersForToken.entrySet()) {
-                            String userLogin = entry.getKey();
-                            GHUser user = entry.getValue();
-                            userLogins.add(userLogin);
-
-                            // Process events for this user
-                            Log.tracef("Fetching events for user %s (%s)", userLogin, tokenLabel);
-                            PagedIterable<GHEventInfo> events = user.listEvents();
-                            processEvents(String.format("events for %s (%s)", userLogin, tokenLabel), github, events, issueRefs, prRefs, startDate, endDate);
-
-                            // Process public events to work around fine-grained token limitations
-                            try {
-                                Log.tracef("Fetching public events for user %s (%s)", userLogin, tokenLabel);
-                                List<GHEventInfo> publicEventsList = github.getUserPublicEvents(userLogin);
-                                processEvents(String.format("public events for %s (%s)", userLogin, tokenLabel), github, publicEventsList, issueRefs, prRefs, startDate, endDate);
-                            } catch (org.kohsuke.github.HttpException e) {
-                                int responseCode = e.getResponseCode();
-                                String message = e.getMessage();
-                                if (responseCode == 403 || responseCode == 429 ||
-                                    (message != null && message.toLowerCase().contains("rate limit"))) {
-                                    Log.debugf("Public events API rate limited for %s (%s), continuing with other events only", userLogin, tokenLabel);
-                                } else {
-                                    Log.warnf("Failed to fetch public events for %s (%s): %s", userLogin, tokenLabel, message);
-                                }
-                            } catch (IOException e) {
-                                Log.debugf("Failed to fetch public events for %s (%s): %s", userLogin, tokenLabel, e.getMessage());
-                            }
-                        }
-                    } catch (Exception e) {
-                        Log.warnf("Error processing %s for instance %s: %s", tokenLabel, instanceName, e.getMessage());
-                    }
-                }
-
-                Log.tracef("After processing all tokens: Found %d issues, %d PRs", issueRefs.size(), prRefs.size());
-
-                // Step 2: Fetch full details for each unique issue/PR
-                // Pass all clients for fallback - not just the ones that discovered each issue
+                ProgressLog.section("%s (%d token(s))", instanceName, clients.size());
                 int beforeCount = allActivities.size();
-                allActivities.addAll(fetchIssueOrPRDetails(IssueType.ISSUE, instanceInfo, clients, issueRefs, startDate, endDate, urlExtractor, userLogins));
-                allActivities.addAll(fetchIssueOrPRDetails(IssueType.PULL_REQUEST, instanceInfo, clients, prRefs, startDate, endDate, urlExtractor, userLogins));
-                int foundCount = allActivities.size() - beforeCount;
 
-                Log.infof("Found %d activities from GitHub instance: %s", foundCount, instanceName);
+                ProgressLog.indented(() -> {
+                    // Step 1: Use events API to discover issues/PRs across all tokens
+                    Map<IssueRef, IssueRefWithClients> issueRefs = new HashMap<>();
+                    Map<IssueRef, IssueRefWithClients> prRefs = new HashMap<>();
+                    Set<String> userLogins = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+                    userLogins.addAll(instanceInfo.configuredUsers);
+
+                    for (int tokenIndex = 0; tokenIndex < clients.size(); tokenIndex++) {
+                        GitHub github = clients.get(tokenIndex);
+                        String tokenLabel = clients.size() > 1 ? String.format("token %d/%d", tokenIndex + 1, clients.size()) : "token";
+
+                        try {
+                            // Determine which users to fetch events for:
+                            // configured users if set, otherwise the token owner.
+                            Map<String, GHUser> usersForToken = new LinkedHashMap<>();
+                            if (!instanceInfo.configuredUsers.isEmpty()) {
+                                for (String login : instanceInfo.configuredUsers) {
+                                    usersForToken.put(login, github.getUser(login));
+                                }
+                            } else {
+                                GHUser myself = github.getMyself();
+                                usersForToken.put(myself.getLogin(), myself);
+                            }
+
+                            for (var entry : usersForToken.entrySet()) {
+                                String userLogin = entry.getKey();
+                                GHUser user = entry.getValue();
+                                userLogins.add(userLogin);
+
+                                // Process events for this user
+                                Log.tracef("Fetching events for user %s (%s)", userLogin, tokenLabel);
+                                PagedIterable<GHEventInfo> events = user.listEvents();
+                                processEvents(String.format("events for %s (%s)", userLogin, tokenLabel), github, events, issueRefs, prRefs, startDate, endDate);
+
+                                // Process public events to work around fine-grained token limitations
+                                try {
+                                    Log.tracef("Fetching public events for user %s (%s)", userLogin, tokenLabel);
+                                    List<GHEventInfo> publicEventsList = github.getUserPublicEvents(userLogin);
+                                    processEvents(String.format("public events for %s (%s)", userLogin, tokenLabel), github, publicEventsList, issueRefs, prRefs, startDate, endDate);
+                                } catch (org.kohsuke.github.HttpException e) {
+                                    int responseCode = e.getResponseCode();
+                                    String message = e.getMessage();
+                                    if (responseCode == 403 || responseCode == 429 ||
+                                        (message != null && message.toLowerCase().contains("rate limit"))) {
+                                        Log.debugf("Public events API rate limited for %s (%s), continuing with other events only", userLogin, tokenLabel);
+                                    } else {
+                                        Log.warnf("Failed to fetch public events for %s (%s): %s", userLogin, tokenLabel, message);
+                                    }
+                                } catch (IOException e) {
+                                    Log.debugf("Failed to fetch public events for %s (%s): %s", userLogin, tokenLabel, e.getMessage());
+                                }
+                            }
+                        } catch (Exception e) {
+                            Log.warnf("Error processing %s for instance %s: %s", tokenLabel, instanceName, e.getMessage());
+                        }
+                    }
+
+                    Log.tracef("After processing all tokens: Found %d issues, %d PRs", issueRefs.size(), prRefs.size());
+
+                    // Step 2: Fetch full details for each unique issue/PR
+                    // Pass all clients for fallback - not just the ones that discovered each issue
+                    allActivities.addAll(fetchIssueOrPRDetails(IssueType.ISSUE, instanceInfo, clients, issueRefs, startDate, endDate, urlExtractor, userLogins));
+                    allActivities.addAll(fetchIssueOrPRDetails(IssueType.PULL_REQUEST, instanceInfo, clients, prRefs, startDate, endDate, urlExtractor, userLogins));
+                });
+
+                ProgressLog.result("Found %d activities", allActivities.size() - beforeCount);
 
             } catch (Exception e) {
-                Log.warnf("Error fetching from %s: %s", instanceName, e.getMessage());
+                ProgressLog.warn("Error fetching from %s: %s", instanceName, e.getMessage());
             }
         }
 
         // Deduplicate activities by URL (multiple instances may see the same issue/PR)
-        allActivities = deduplicateActivities(allActivities);
-
-        return allActivities;
+        return deduplicateActivities(allActivities);
     }
 
     /**
@@ -245,7 +245,7 @@ public class GitHubProvider implements ActivityProvider {
         }
 
         if (duplicatesRemoved > 0) {
-            Log.infof("Removed %d duplicate activities from multiple GitHub instances", duplicatesRemoved);
+            ProgressLog.detail("Removed %d duplicate activities from multiple GitHub instances", duplicatesRemoved);
         }
 
         return deduplicated;
@@ -342,7 +342,7 @@ public class GitHubProvider implements ActivityProvider {
         int newIssues = issueRefs.size() - beforeIssues;
         int newPRs = prRefs.size() - beforePRs;
         String earliestEventInfo = earliestEventTimestamp != null ? ", earliest event: " + earliestEventTimestamp : "";
-        Log.infof("[%s] Processed %d events%s. Found %d new issues, %d new PRs",
+        ProgressLog.detail("[%s] Processed %d events%s. Found %d new issues, %d new PRs",
             eventSource, eventCount, earliestEventInfo, newIssues, newPRs);
     }
 
@@ -676,7 +676,7 @@ public class GitHubProvider implements ActivityProvider {
                     activities.add(activity);
                     fetched = true;
                     if (i >= discoveringClients.size()) {
-                        Log.infof("Successfully fetched %s %s#%d using fallback client %d/%d",
+                        ProgressLog.detail("Successfully fetched %s %s#%d using fallback client %d/%d",
                             type == IssueType.PULL_REQUEST ? "PR" : "issue",
                             ref.repoFullName, ref.number, i + 1, clientsToTry.size());
                     }

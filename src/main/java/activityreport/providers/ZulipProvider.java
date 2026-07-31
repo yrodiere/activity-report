@@ -9,6 +9,7 @@ import activityreport.config.AppConfig;
 import activityreport.model.ActionCategory;
 import activityreport.model.Activity;
 import activityreport.model.ActivityProvider;
+import activityreport.util.ProgressLog;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.logging.Log;
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
@@ -72,109 +73,111 @@ public class ZulipProvider implements ActivityProvider {
     private List<Activity> fetchFromInstance(ZulipInstance instance, Instant startDate, Instant endDate, UrlExtractor urlExtractor) throws Exception {
         List<Activity> activities = new ArrayList<>();
 
-        Log.infof("Fetching activities from Zulip instance: %s", instance.url);
+        ProgressLog.section("%s", instance.url);
 
-        // Build REST client for this instance
-        var client = QuarkusRestClientBuilder.newBuilder()
-            .baseUri(URI.create(instance.url))
-            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-            .register(new BasicAuthRequestFilter(instance.email, instance.apiKey))
-            .loggingScope(LoggingScope.REQUEST_RESPONSE)
-            .clientLogger(new TraceClientLogger())
-            .build(ZulipRestClient.class);
+        ProgressLog.indented(() -> {
+            // Build REST client for this instance
+            var client = QuarkusRestClientBuilder.newBuilder()
+                .baseUri(URI.create(instance.url))
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .register(new BasicAuthRequestFilter(instance.email, instance.apiKey))
+                .loggingScope(LoggingScope.REQUEST_RESPONSE)
+                .clientLogger(new TraceClientLogger())
+                .build(ZulipRestClient.class);
 
-        // Get current user
-        var userRoot = client.getCurrentUser();
-        int userId = userRoot.get("user_id").asInt();
+            // Get current user
+            var userRoot = client.getCurrentUser();
+            int userId = userRoot.get("user_id").asInt();
 
-        // Fetch messages sent by this user (exclude private messages using negation)
-        var narrow = String.format("[{\"operator\":\"sender\",\"operand\":%d},{\"operator\":\"is\",\"operand\":\"dm\",\"negated\":true}]", userId);
-        var messagesRoot = client.getMessages("newest", 1000, 0, narrow);
-        var messages = messagesRoot.get("messages");
+            // Fetch messages sent by this user (exclude private messages using negation)
+            var narrow = String.format("[{\"operator\":\"sender\",\"operand\":%d},{\"operator\":\"is\",\"operand\":\"dm\",\"negated\":true}]", userId);
+            var messagesRoot = client.getMessages("newest", 1000, 0, narrow);
+            var messages = messagesRoot.get("messages");
 
-        // Group messages by topic (stream + subject)
-        Map<TopicRef, TopicMessages> topicMap = new HashMap<>();
+            // Group messages by topic (stream + subject)
+            Map<TopicRef, TopicMessages> topicMap = new HashMap<>();
 
-        if (messages != null && messages.isArray()) {
-            for (JsonNode message : messages) {
-                String messageType = message.get("type").asText();
+            if (messages != null && messages.isArray()) {
+                for (JsonNode message : messages) {
+                    String messageType = message.get("type").asText();
 
-                // Skip DMs (private messages)
-                if ("private".equals(messageType)) {
-                    continue;
+                    // Skip DMs (private messages)
+                    if ("private".equals(messageType)) {
+                        continue;
+                    }
+
+                    long timestamp = message.get("timestamp").asLong();
+                    Instant messageTime = Instant.ofEpochSecond(timestamp);
+
+                    // Skip if outside date range
+                    if (messageTime.isBefore(startDate) || messageTime.isAfter(endDate)) {
+                        continue;
+                    }
+
+                    String streamName = message.get("display_recipient").asText();
+                    String subject = message.get("subject").asText();
+                    int messageId = message.get("id").asInt();
+                    String content = message.has("content") ? message.get("content").asText() : "";
+
+                    TopicRef topicRef = new TopicRef(streamName, subject);
+                    TopicMessages topicMessages = topicMap.computeIfAbsent(topicRef,
+                        k -> new TopicMessages(streamName, subject, new ArrayList<>()));
+
+                    topicMessages.messageIds.add(messageId);
+                    topicMessages.messageContents.add(content);
+                    topicMessages.updateTimestamp(messageTime);
                 }
-
-                long timestamp = message.get("timestamp").asLong();
-                Instant messageTime = Instant.ofEpochSecond(timestamp);
-
-                // Skip if outside date range
-                if (messageTime.isBefore(startDate) || messageTime.isAfter(endDate)) {
-                    continue;
-                }
-
-                String streamName = message.get("display_recipient").asText();
-                String subject = message.get("subject").asText();
-                int messageId = message.get("id").asInt();
-                String content = message.has("content") ? message.get("content").asText() : "";
-
-                TopicRef topicRef = new TopicRef(streamName, subject);
-                TopicMessages topicMessages = topicMap.computeIfAbsent(topicRef,
-                    k -> new TopicMessages(streamName, subject, new ArrayList<>()));
-
-                topicMessages.messageIds.add(messageId);
-                topicMessages.messageContents.add(content);
-                topicMessages.updateTimestamp(messageTime);
             }
-        }
 
-        // Create one activity per topic
-        String source = "Zulip - " + instance.url.replace("https://", "").replace("http://", "");
+            // Create one activity per topic
+            String source = "Zulip - " + instance.url.replace("https://", "").replace("http://", "");
 
-        for (TopicMessages topic : topicMap.values()) {
-            try {
-                // Extract external URLs (GitHub PRs, GitLab MRs, JIRA issues) from message content
-                Set<String> externalUrls = new LinkedHashSet<>();
-                for (String messageContent : topic.messageContents) {
-                    urlExtractor.extractExternalUrls(messageContent, externalUrls);
+            for (TopicMessages topic : topicMap.values()) {
+                try {
+                    // Extract external URLs (GitHub PRs, GitLab MRs, JIRA issues) from message content
+                    Set<String> externalUrls = new LinkedHashSet<>();
+                    for (String messageContent : topic.messageContents) {
+                        urlExtractor.extractExternalUrls(messageContent, externalUrls);
+                    }
+
+                    // Also extract from topic subject
+                    urlExtractor.extractExternalUrls(topic.subject, externalUrls);
+
+                    List<String> contentUrls = new ArrayList<>(externalUrls);
+
+                    if (!externalUrls.isEmpty()) {
+                        Log.tracef("Extracted %d external URLs from Zulip topic %s/%s",
+                            externalUrls.size(), topic.streamName, topic.subject);
+                    }
+
+                    String topicUrl = buildTopicUrl(instance.url, topic.streamName, topic.subject);
+
+                    Activity activity = new Activity(
+                        source,
+                        "topic",
+                        ActionCategory.DISCUSS,  // Zulip activities are always discussions
+                        topic.streamName + " / " + topic.subject,
+                        "", // description
+                        topicUrl,
+                        topic.latestTimestamp,
+                        contentUrls
+                    );
+
+                    // Add default project if configured
+                    if (instance.defaultProject != null) {
+                        activity.addMetadata("defaultProject", instance.defaultProject);
+                    }
+
+                    activities.add(activity);
+                } catch (Exception e) {
+                    Log.tracef("Failed to create activity for topic %s/%s: %s",
+                        topic.streamName, topic.subject, e.getMessage());
                 }
-
-                // Also extract from topic subject
-                urlExtractor.extractExternalUrls(topic.subject, externalUrls);
-
-                List<String> contentUrls = new ArrayList<>(externalUrls);
-
-                if (!externalUrls.isEmpty()) {
-                    Log.tracef("Extracted %d external URLs from Zulip topic %s/%s",
-                        externalUrls.size(), topic.streamName, topic.subject);
-                }
-
-                String topicUrl = buildTopicUrl(instance.url, topic.streamName, topic.subject);
-
-                Activity activity = new Activity(
-                    source,
-                    "topic",
-                    ActionCategory.DISCUSS,  // Zulip activities are always discussions
-                    topic.streamName + " / " + topic.subject,
-                    "", // description
-                    topicUrl,
-                    topic.latestTimestamp,
-                    contentUrls
-                );
-
-                // Add default project if configured
-                if (instance.defaultProject != null) {
-                    activity.addMetadata("defaultProject", instance.defaultProject);
-                }
-
-                activities.add(activity);
-            } catch (Exception e) {
-                Log.tracef("Failed to create activity for topic %s/%s: %s",
-                    topic.streamName, topic.subject, e.getMessage());
             }
-        }
+        });
 
-        Log.infof("Found %d activities from Zulip instance: %s", activities.size(), instance.url);
+        ProgressLog.result("Found %d activities", activities.size());
 
         return activities;
     }
