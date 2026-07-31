@@ -12,6 +12,7 @@ import activityreport.report.MarkdownReportGenerator;
 import activityreport.report.ProjectClassifier;
 import activityreport.report.SimpleGrouper;
 import activityreport.util.UrlExtractor;
+import activityreport.util.ProgressLog;
 import io.quarkus.logging.Log;
 import io.quarkus.picocli.runtime.annotations.TopCommand;
 import jakarta.inject.Inject;
@@ -100,12 +101,14 @@ public class ActivityReportCommand implements Runnable {
     @Override
     public void run() {
         try {
-            Log.info("Activity Report Generator");
-            Log.info("=========================\n");
+            ProgressLog.header("Activity Report Generator");
+            ProgressLog.header("=========================");
+            ProgressLog.blank();
 
             // Validate configuration
             validateConfig();
-            Log.info("Configuration loaded successfully.\n");
+            ProgressLog.info("Configuration loaded successfully.");
+            ProgressLog.blank();
 
             // Determine date range
             Instant startDate, endDate;
@@ -119,8 +122,9 @@ public class ActivityReportCommand implements Runnable {
             }
 
             DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneId.systemDefault());
-            Log.infof("Fetching activities from %s to %s\n",
+            ProgressLog.info("Fetching activities from %s to %s",
                      formatter.format(startDate), formatter.format(endDate));
+            ProgressLog.blank();
 
             // Initialize URL extractor (providers will register their patterns)
             UrlExtractor urlExtractor = new UrlExtractor();
@@ -150,7 +154,7 @@ public class ActivityReportCommand implements Runnable {
             }
 
             if (providers.isEmpty()) {
-                Log.error("No providers are configured and enabled.");
+                ProgressLog.error("No providers are configured and enabled.");
                 System.exit(1);
                 return;
             }
@@ -160,18 +164,21 @@ public class ActivityReportCommand implements Runnable {
             List<String> errors = new ArrayList<>();
 
             for (ActivityProvider provider : providers) {
-                Log.infof("Fetching from %s...", provider.getName());
+                ProgressLog.section("Fetching from %s...", provider.getName());
                 try {
-                    List<Activity> activities = provider.fetchActivities(startDate, endDate, urlExtractor);
-                    allActivities.addAll(activities);
-                    Log.infof("  Found %d activities", activities.size());
+                    int before = allActivities.size();
+                    ProgressLog.indented(() ->
+                        allActivities.addAll(provider.fetchActivities(startDate, endDate, urlExtractor))
+                    );
+                    ProgressLog.result("Found %d activities", allActivities.size() - before);
                 } catch (Exception e) {
-                    Log.errorf("  %s", e.getMessage());
+                    ProgressLog.error("%s", e.getMessage());
                     errors.add(provider.getName() + ": " + e.getMessage());
                 }
             }
 
-            Log.infof("\nTotal activities found: %d", allActivities.size());
+            ProgressLog.blank();
+            ProgressLog.resultHighlight("Total: %d activities", allActivities.size());
 
             // Dump activities to JSON for debugging
             if (!allActivities.isEmpty()) {
@@ -193,13 +200,14 @@ public class ActivityReportCommand implements Runnable {
                     }
                 }
                 Path outputPath = writeReportToFile(emptyReport.toString(), startDate, endDate);
-                Log.infof("\nReport written to: %s", outputPath);
+                ProgressLog.info("Report written to: %s", outputPath);
                 openInEditor(outputPath);
                 return;
             }
 
             // Classify activities into projects (for those without projects)
-            Log.info("Classifying activities into projects...\n");
+            ProgressLog.blank();
+            ProgressLog.section("Classifying activities into projects...");
             ProjectClassifier classifier = new ProjectClassifier(config);
             List<Activity> classifiedActivities = new ArrayList<>();
             for (Activity activity : allActivities) {
@@ -230,7 +238,7 @@ public class ActivityReportCommand implements Runnable {
             // Process with AI or simple grouping
             List<ActivityGroup> groups;
             if (noAi) {
-                Log.info("Grouping activities (simple URL-based)...\n");
+                ProgressLog.section("Grouping activities (simple URL-based)...");
                 groups = SimpleGrouper.groupActivities(classifiedActivities);
             } else {
                 AIProcessor aiProcessor = new AIProcessor(config);
@@ -241,33 +249,38 @@ public class ActivityReportCommand implements Runnable {
                     // Step 2: Group related activities
                     groups = aiProcessor.groupActivities(enrichedActivities);
                 } else {
-                    Log.info("AI model not available, falling back to simple grouping");
+                    ProgressLog.warn("AI model not available, falling back to simple grouping");
                     groups = SimpleGrouper.groupActivities(classifiedActivities);
                 }
             }
 
             // Generate report
-            Log.info("Generating report...\n");
+            ProgressLog.blank();
+            ProgressLog.section("Generating report...");
             String report = MarkdownReportGenerator.generate(groups);
 
             // Write report to file
             Path outputPath = writeReportToFile(report, startDate, endDate);
-            Log.infof("\nReport written to: %s", outputPath);
+            ProgressLog.blank();
+            ProgressLog.result("Report written to: %s", outputPath);
 
             // Report any errors at the end
             if (!errors.isEmpty()) {
-                Log.warn("\nSome providers encountered errors:");
-                for (String error : errors) {
-                    Log.warnf("  - %s", error);
-                }
+                ProgressLog.blank();
+                ProgressLog.warn("Some providers encountered errors:");
+                ProgressLog.indented(() -> {
+                    for (String error : errors) {
+                        ProgressLog.warn("%s", error);
+                    }
+                });
             }
 
             // Open in editor
             openInEditor(outputPath);
 
         } catch (Exception e) {
-            Log.errorf("%s", e.getMessage());
-            Log.error("", e);
+            ProgressLog.error("%s", e.getMessage());
+            ProgressLog.error("", e);
             System.exit(1);
         }
     }
@@ -322,7 +335,7 @@ public class ActivityReportCommand implements Runnable {
         // Serialize activities to JSON using injected ObjectMapper
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(outputPath.toFile(), activities);
 
-        Log.infof("Activities dumped to: %s", outputPath);
+        ProgressLog.detail("Activities dumped to: %s", outputPath);
     }
 
     /**
@@ -357,10 +370,10 @@ public class ActivityReportCommand implements Runnable {
      * Open the report file using xdg-open.
      */
     private void openInEditor(Path filePath) {
-        Log.infof("\nReport file: %s", filePath);
+        ProgressLog.info("Report file: %s", filePath);
 
         try {
-            Log.info("Opening report...\n");
+            ProgressLog.info("Opening report...");
 
             ProcessBuilder pb = new ProcessBuilder("xdg-open", filePath.toString());
             pb.start();

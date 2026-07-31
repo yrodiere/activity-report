@@ -9,6 +9,7 @@ import activityreport.config.AppConfig;
 import activityreport.model.ActionCategory;
 import activityreport.model.Activity;
 import activityreport.model.ActivityProvider;
+import activityreport.util.ProgressLog;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -78,120 +79,122 @@ public class JiraProvider implements ActivityProvider {
     private List<Activity> fetchFromInstance(JiraInstance instance, Instant startDate, Instant endDate, UrlExtractor urlExtractor) throws Exception {
         List<Activity> activities = new ArrayList<>();
 
-        Log.infof("Fetching activities from JIRA instance: %s", instance.name);
+        ProgressLog.section("%s", instance.name);
 
-        // Build REST client for this instance
-        var client = QuarkusRestClientBuilder.newBuilder()
-            .baseUri(URI.create(instance.url))
-            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-            .register(new BasicAuthRequestFilter(instance.email, instance.token))
-            .loggingScope(LoggingScope.REQUEST_RESPONSE)
-            .clientLogger(new TraceClientLogger())
-            .build(JiraRestClient.class);
+        ProgressLog.indented(() -> {
+            // Build REST client for this instance
+            var client = QuarkusRestClientBuilder.newBuilder()
+                .baseUri(URI.create(instance.url))
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .register(new BasicAuthRequestFilter(instance.email, instance.token))
+                .loggingScope(LoggingScope.REQUEST_RESPONSE)
+                .clientLogger(new TraceClientLogger())
+                .build(JiraRestClient.class);
 
-        // Build JQL query - find all issues the user participated in (created, commented, assigned)
-        long daysAgo = Duration.between(startDate, Instant.now()).toDays();
-        var jql = String.format("participant = currentUser() AND updated >= -%dd ORDER BY updated DESC", daysAgo + 1);
+            // Build JQL query - find all issues the user participated in (created, commented, assigned)
+            long daysAgo = Duration.between(startDate, Instant.now()).toDays();
+            var jql = String.format("participant = currentUser() AND updated >= -%dd ORDER BY updated DESC", daysAgo + 1);
 
-        // Build request body - expand changelog and renderedFields
-        ObjectMapper mapper = new ObjectMapper();
-        ObjectNode request = mapper.createObjectNode();
-        request.put("jql", jql);
-        request.putArray("fields").add("key").add("summary").add("status").add("updated").add("issuetype");
-        request.put("maxResults", 100);
-        request.put("expand", "changelog,renderedFields");
+            // Build request body - expand changelog and renderedFields
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode request = mapper.createObjectNode();
+            request.put("jql", jql);
+            request.putArray("fields").add("key").add("summary").add("status").add("updated").add("issuetype");
+            request.put("maxResults", 100);
+            request.put("expand", "changelog,renderedFields");
 
-        // Make API call
-        var root = client.search(request);
-        var issues = root.get("issues");
+            // Make API call
+            var root = client.search(request);
+            var issues = root.get("issues");
 
-        if (issues != null && issues.isArray()) {
-            for (JsonNode issue : issues) {
-                String key = issue.get("key").asText();
+            if (issues != null && issues.isArray()) {
+                for (JsonNode issue : issues) {
+                    String key = issue.get("key").asText();
 
-                try {
-                    String summary = issue.get("fields").get("summary").asText();
-                    String issueType = issue.get("fields").get("issuetype").get("name").asText();
-                    String status = issue.get("fields").get("status").get("name").asText();
-                    String issueUrl = instance.url + "/browse/" + key;
+                    try {
+                        String summary = issue.get("fields").get("summary").asText();
+                        String issueType = issue.get("fields").get("issuetype").get("name").asText();
+                        String status = issue.get("fields").get("status").get("name").asText();
+                        String issueUrl = instance.url + "/browse/" + key;
 
-                    // Track user's latest activity in the time period
-                    Instant latestUserActivity = null;
+                        // Track user's latest activity in the time period
+                        Instant latestUserActivity = null;
 
-                    // Parse changelog to find user's actions during the time period
-                    var changelog = issue.get("changelog");
-                    if (changelog != null && changelog.get("histories") != null) {
-                        for (JsonNode history : changelog.get("histories")) {
-                            String createdStr = history.get("created").asText();
-                            Instant changeDate = Instant.parse(createdStr);
+                        // Parse changelog to find user's actions during the time period
+                        var changelog = issue.get("changelog");
+                        if (changelog != null && changelog.get("histories") != null) {
+                            for (JsonNode history : changelog.get("histories")) {
+                                String createdStr = history.get("created").asText();
+                                Instant changeDate = Instant.parse(createdStr);
 
-                            // Skip if outside date range
-                            if (changeDate.isBefore(startDate) || changeDate.isAfter(endDate)) {
-                                continue;
-                            }
+                                // Skip if outside date range
+                                if (changeDate.isBefore(startDate) || changeDate.isAfter(endDate)) {
+                                    continue;
+                                }
 
-                            // Check if this change was made by the current user (by email)
-                            var author = history.get("author");
-                            if (author != null && author.get("emailAddress") != null) {
-                                String authorEmail = author.get("emailAddress").asText();
-                                if (instance.email.equals(authorEmail)) {
-                                    // Update latest activity timestamp
-                                    if (latestUserActivity == null || changeDate.isAfter(latestUserActivity)) {
-                                        latestUserActivity = changeDate;
+                                // Check if this change was made by the current user (by email)
+                                var author = history.get("author");
+                                if (author != null && author.get("emailAddress") != null) {
+                                    String authorEmail = author.get("emailAddress").asText();
+                                    if (instance.email.equals(authorEmail)) {
+                                        // Update latest activity timestamp
+                                        if (latestUserActivity == null || changeDate.isAfter(latestUserActivity)) {
+                                            latestUserActivity = changeDate;
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    // Extract external URLs from summary and rendered description
-                    Set<String> externalUrls = new java.util.LinkedHashSet<>();
-                    urlExtractor.extractExternalUrls(summary, externalUrls);
+                        // Extract external URLs from summary and rendered description
+                        Set<String> externalUrls = new java.util.LinkedHashSet<>();
+                        urlExtractor.extractExternalUrls(summary, externalUrls);
 
-                    // Extract from description
-                    var renderedFields = issue.get("renderedFields");
-                    if (renderedFields != null && renderedFields.get("description") != null) {
-                        String description = renderedFields.get("description").asText();
-                        urlExtractor.extractExternalUrls(description, externalUrls);
-                    }
-
-                    List<String> contentUrls = new ArrayList<>(externalUrls);
-                    boolean hasPrUrls = !externalUrls.isEmpty();
-
-                    // Only create activity if user had activity during the time period
-                    if (latestUserActivity != null) {
-                        // Determine action category: if there are PR URLs, it's code work, otherwise discuss
-                        ActionCategory actionCategory = hasPrUrls ? ActionCategory.CODE : ActionCategory.DISCUSS;
-
-                        Activity activity = new Activity(
-                            "JIRA - " + instance.name,
-                            "issue",
-                            actionCategory,
-                            key + ": " + summary,
-                            "Type: " + issueType + ", Status: " + status,
-                            issueUrl,
-                            latestUserActivity,
-                            contentUrls
-                        );
-
-                        activity.addMetadata("issueType", issueType);
-                        activity.addMetadata("status", status);
-
-                        // Add default project if configured
-                        if (instance.defaultProject != null) {
-                            activity.addMetadata("defaultProject", instance.defaultProject);
+                        // Extract from description
+                        var renderedFields = issue.get("renderedFields");
+                        if (renderedFields != null && renderedFields.get("description") != null) {
+                            String description = renderedFields.get("description").asText();
+                            urlExtractor.extractExternalUrls(description, externalUrls);
                         }
 
-                        activities.add(activity);
+                        List<String> contentUrls = new ArrayList<>(externalUrls);
+                        boolean hasPrUrls = !externalUrls.isEmpty();
+
+                        // Only create activity if user had activity during the time period
+                        if (latestUserActivity != null) {
+                            // Determine action category: if there are PR URLs, it's code work, otherwise discuss
+                            ActionCategory actionCategory = hasPrUrls ? ActionCategory.CODE : ActionCategory.DISCUSS;
+
+                            Activity activity = new Activity(
+                                "JIRA - " + instance.name,
+                                "issue",
+                                actionCategory,
+                                key + ": " + summary,
+                                "Type: " + issueType + ", Status: " + status,
+                                issueUrl,
+                                latestUserActivity,
+                                contentUrls
+                            );
+
+                            activity.addMetadata("issueType", issueType);
+                            activity.addMetadata("status", status);
+
+                            // Add default project if configured
+                            if (instance.defaultProject != null) {
+                                activity.addMetadata("defaultProject", instance.defaultProject);
+                            }
+
+                            activities.add(activity);
+                        }
+                    } catch (Exception e) {
+                        Log.tracef("Failed to fetch details for issue %s: %s", key, e.getMessage());
                     }
-                } catch (Exception e) {
-                    Log.tracef("Failed to fetch details for issue %s: %s", key, e.getMessage());
                 }
             }
-        }
+        });
 
-        Log.infof("Found %d activities from JIRA instance: %s", activities.size(), instance.name);
+        ProgressLog.result("Found %d activities", activities.size());
 
         return activities;
     }
