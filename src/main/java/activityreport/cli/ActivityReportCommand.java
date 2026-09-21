@@ -60,7 +60,6 @@ import java.util.Map;
 )
 public class ActivityReportCommand implements Runnable {
 
-    public static final LocalTime END_OF_DAY_TIME = LocalTime.of(23, 59, 59);
     @Inject
     AppConfig config;
 
@@ -115,7 +114,7 @@ public class ActivityReportCommand implements Runnable {
             if (endDateStr != null) {
                 endDate = LocalDate.parse(endDateStr).atTime(LocalTime.MAX).atZone(ZoneId.systemDefault()).toInstant();
             } else {
-                endDate = Instant.now().atZone(ZoneId.systemDefault()).with(LocalTime.MAX).toInstant();
+                endDate = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant();
             }
             if (startDateStr != null) {
                 startDate = LocalDate.parse(startDateStr).atStartOfDay(ZoneId.systemDefault()).toInstant();
