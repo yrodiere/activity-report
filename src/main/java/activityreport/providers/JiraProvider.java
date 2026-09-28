@@ -2,6 +2,7 @@ package activityreport.providers;
 
 import activityreport.client.BasicAuthRequestFilter;
 import activityreport.client.JiraRestClient;
+import activityreport.client.JiraTenantClient;
 import activityreport.client.TraceClientLogger;
 import activityreport.util.UrlExtractor;
 import org.jboss.resteasy.reactive.client.api.LoggingScope;
@@ -19,6 +20,9 @@ import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
 
 /**
@@ -26,6 +30,14 @@ import java.util.*;
  */
 public class JiraProvider implements ActivityProvider {
     private final List<JiraInstance> instances;
+
+    private static final String ATLASSIAN_API_GATEWAY = "https://api.atlassian.com/ex/jira/";
+
+    // Jira returns timestamps like "2026-09-25T10:46:25.588-0700" (no colon in offset)
+    private static final DateTimeFormatter JIRA_TIMESTAMP = new DateTimeFormatterBuilder()
+            .append(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            .appendOffset("+HHmm", "Z")
+            .toFormatter();
 
     private record JiraInstance(String name, String url, String email, String token, String defaultProject) {}
 
@@ -76,15 +88,46 @@ public class JiraProvider implements ActivityProvider {
         return allActivities;
     }
 
+    private Optional<String> resolveCloudId(String instanceUrl) {
+        try {
+            var tenantClient = QuarkusRestClientBuilder.newBuilder()
+                    .baseUri(URI.create(instanceUrl))
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .loggingScope(LoggingScope.REQUEST_RESPONSE)
+                    .clientLogger(new TraceClientLogger())
+                    .build(JiraTenantClient.class);
+            var tenantInfo = tenantClient.tenantInfo();
+            var cloudIdNode = tenantInfo.get("cloudId");
+            if (cloudIdNode != null) {
+                return Optional.of(cloudIdNode.asText());
+            }
+        } catch (Exception e) {
+            Log.debugf("Could not resolve cloudId for %s: %s", instanceUrl, e.getMessage());
+        }
+        return Optional.empty();
+    }
+
     private List<Activity> fetchFromInstance(JiraInstance instance, Instant startDate, Instant endDate, UrlExtractor urlExtractor) throws Exception {
         List<Activity> activities = new ArrayList<>();
 
         ProgressLog.section("%s", instance.name);
 
         ProgressLog.indented(() -> {
+            // Resolve cloudId to use the Atlassian API gateway (required for scoped API tokens)
+            var cloudId = resolveCloudId(instance.url);
+            URI apiBaseUri;
+            if (cloudId.isPresent()) {
+                apiBaseUri = URI.create(ATLASSIAN_API_GATEWAY + cloudId.get());
+                ProgressLog.detail("Using Atlassian Cloud API gateway");
+            } else {
+                apiBaseUri = URI.create(instance.url);
+                ProgressLog.detail("Using direct instance URL");
+            }
+
             // Build REST client for this instance
             var client = QuarkusRestClientBuilder.newBuilder()
-                .baseUri(URI.create(instance.url))
+                .baseUri(apiBaseUri)
                 .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
                 .register(new BasicAuthRequestFilter(instance.email, instance.token))
@@ -92,9 +135,13 @@ public class JiraProvider implements ActivityProvider {
                 .clientLogger(new TraceClientLogger())
                 .build(JiraRestClient.class);
 
-            // Build JQL query - find all issues the user participated in (created, commented, assigned)
+            // Build JQL query - find all issues the user was involved in
             long daysAgo = Duration.between(startDate, Instant.now()).toDays();
-            var jql = String.format("participant = currentUser() AND updated >= -%dd ORDER BY updated DESC", daysAgo + 1);
+            var jql = String.format(
+                    "(assignee = currentUser() OR reporter = currentUser()"
+                    + " OR creator = currentUser() OR watcher = currentUser())"
+                    + " AND updated >= -%dd ORDER BY updated DESC",
+                    daysAgo + 1);
 
             // Build request body - expand changelog and renderedFields
             ObjectMapper mapper = new ObjectMapper();
@@ -126,7 +173,7 @@ public class JiraProvider implements ActivityProvider {
                         if (changelog != null && changelog.get("histories") != null) {
                             for (JsonNode history : changelog.get("histories")) {
                                 String createdStr = history.get("created").asText();
-                                Instant changeDate = Instant.parse(createdStr);
+                                Instant changeDate = OffsetDateTime.parse(createdStr, JIRA_TIMESTAMP).toInstant();
 
                                 // Skip if outside date range
                                 if (changeDate.isBefore(startDate) || changeDate.isAfter(endDate)) {

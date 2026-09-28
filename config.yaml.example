@@ -27,11 +27,12 @@ providers:
       #   default-project: "Infrastructure"
 
   # JIRA (supports multiple instances)
+  # Use a scoped API token with read:jira-work and read:jira-user scopes
   jira:
     enabled: false  # Set to true to enable
     instances:
       # - name: "Project JIRA"
-      #   url: "https://yourcompany.atlassian.net"
+      #   url: "https://yourcompany.atlassian.net"  # Instance URL (API gateway resolved automatically)
       #   email: "your-email@example.com"
       #   token: "op://Private/JIRA/token"
       #   default-project: "Infrastructure"
