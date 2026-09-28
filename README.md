@@ -217,13 +217,20 @@ If `users` is omitted, the tool uses the token owner (current behavior).
 
 #### JIRA
 
-**JIRA Cloud:**
+**JIRA Cloud (Scoped API Token — Recommended):**
 1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
-2. Click "Create API token"
-3. Copy token and store securely
+2. Click **"Create API token with scopes"**
+3. Name the token (e.g., "activity-report")
+4. Set an expiration date (up to 365 days)
+5. Select the **Jira** app, then add these scopes:
+   - `read:jira-work` — issue search, details, changelogs
+   - `read:jira-user` — user information (needed for activity attribution)
+6. Copy token and store securely
+
+The tool automatically resolves the Atlassian Cloud API gateway URL from your instance URL, so no additional configuration is needed.
 
 **JIRA Server/Data Center:**
-Use your JIRA password or create a personal access token in JIRA settings.
+Use your JIRA password or create a personal access token in JIRA settings. The tool connects directly to the configured instance URL.
 
 #### Zulip
 

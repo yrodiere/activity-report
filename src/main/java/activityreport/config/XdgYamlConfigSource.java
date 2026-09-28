@@ -31,6 +31,12 @@ public class XdgYamlConfigSource implements ConfigSourceProvider {
             return Collections.emptyList();
         }
 
+        // Skip loading config for --help/--version to avoid validation errors
+        // on unresolved op:// references
+        if (CliFlags.isHelpOrVersionRequested()) {
+            return Collections.emptyList();
+        }
+
         Path configPath = getConfigPath();
         try {
             YamlConfigSource source = new YamlConfigSource(configPath.toUri().toURL(), ORDINAL);
