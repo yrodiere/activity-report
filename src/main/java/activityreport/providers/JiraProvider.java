@@ -1,7 +1,6 @@
 package activityreport.providers;
 
 import activityreport.client.BasicAuthRequestFilter;
-import activityreport.client.JiraDevStatusClient;
 import activityreport.client.JiraRestClient;
 import activityreport.client.JiraTenantClient;
 import activityreport.client.TraceClientLogger;
@@ -112,24 +111,22 @@ public class JiraProvider implements ActivityProvider {
         ProgressLog.indented(() -> {
             URI apiBaseUri = resolveApiBaseUri(instance.url);
 
-            var clientBuilder = QuarkusRestClientBuilder.newBuilder()
+            var client = QuarkusRestClientBuilder.newBuilder()
                 .baseUri(apiBaseUri)
                 .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
                 .register(new BasicAuthRequestFilter(instance.email, instance.token))
                 .loggingScope(LoggingScope.REQUEST_RESPONSE)
-                .clientLogger(new TraceClientLogger());
-            var client = clientBuilder.build(JiraRestClient.class);
-            var devStatusClient = clientBuilder.build(JiraDevStatusClient.class);
+                .clientLogger(new TraceClientLogger())
+                .build(JiraRestClient.class);
 
             String currentAccountId = client.myself().get("accountId").asText();
 
             var issues = searchIssues(client, currentAccountId, startDate);
-            var prUrlsByIssueId = fetchLinkedPrUrls(devStatusClient, issues);
 
             for (JsonNode issue : issues) {
                 try {
-                    var activity = toActivity(issue, instance, currentAccountId, startDate, endDate, prUrlsByIssueId);
+                    var activity = toActivity(issue, instance, currentAccountId, startDate, endDate);
                     if (activity != null) {
                         activities.add(activity);
                     }
@@ -181,56 +178,8 @@ public class JiraProvider implements ActivityProvider {
         return issues;
     }
 
-    /**
-     * Fetch linked PR URLs from the Jira-GitHub integration (dev-status API).
-     * Requires the read:dev-info:jira scope; gracefully degrades if unavailable.
-     */
-    private Map<String, List<String>> fetchLinkedPrUrls(JiraDevStatusClient devStatusClient, List<JsonNode> issues) {
-        Map<String, List<String>> prUrlsByIssueId = new HashMap<>();
-
-        for (JsonNode issue : issues) {
-            String issueId = issue.get("id").asText();
-            try {
-                var devDetail = devStatusClient.detail(issueId, "GitHub", "pullrequest");
-                List<String> prUrls = extractPrUrls(devDetail);
-                if (!prUrls.isEmpty()) {
-                    prUrlsByIssueId.put(issueId, prUrls);
-                }
-            } catch (Exception e) {
-                Log.debugf("Dev status API unavailable: %s", e.getMessage());
-                ProgressLog.detail("Dev status API not available (add read:dev-info:jira scope to enable PR detection)");
-                return prUrlsByIssueId;
-            }
-        }
-
-        if (!prUrlsByIssueId.isEmpty()) {
-            ProgressLog.detail("Found linked PRs on %d issues", prUrlsByIssueId.size());
-        }
-        return prUrlsByIssueId;
-    }
-
-    private List<String> extractPrUrls(JsonNode devDetail) {
-        List<String> prUrls = new ArrayList<>();
-        var detail = devDetail.path("detail");
-        if (detail.isArray()) {
-            for (JsonNode provider : detail) {
-                var pullRequests = provider.path("pullRequests");
-                if (pullRequests.isArray()) {
-                    for (JsonNode pr : pullRequests) {
-                        String prUrl = pr.path("url").asText(null);
-                        if (prUrl != null) {
-                            prUrls.add(prUrl);
-                        }
-                    }
-                }
-            }
-        }
-        return prUrls;
-    }
-
     private Activity toActivity(JsonNode issue, JiraInstance instance, String currentAccountId,
-                                Instant startDate, Instant endDate,
-                                Map<String, List<String>> prUrlsByIssueId) {
+                                Instant startDate, Instant endDate) {
         String key = issue.get("key").asText();
         var fields = issue.get("fields");
         String summary = fields.get("summary").asText();
@@ -247,15 +196,10 @@ public class JiraProvider implements ActivityProvider {
         boolean isInProgress = "indeterminate".equals(
                 fields.get("status").path("statusCategory").path("key").asText(""));
 
-        String issueId = issue.get("id").asText();
-        List<String> contentUrls = new ArrayList<>();
-        boolean hasLinkedPrs = prUrlsByIssueId.containsKey(issueId);
-        if (hasLinkedPrs) {
-            contentUrls.addAll(prUrlsByIssueId.get(issueId));
-        }
-
+        // CODE: user is assignee AND issue is in progress
+        // DISCUSS: everything else (user participated but isn't doing the code work)
         ActionCategory actionCategory =
-                isAssignee && (hasLinkedPrs || isInProgress)
+                isAssignee && isInProgress
                         ? ActionCategory.CODE : ActionCategory.DISCUSS;
 
         Activity activity = new Activity(
@@ -266,7 +210,7 @@ public class JiraProvider implements ActivityProvider {
             "Type: " + issueType + ", Status: " + status,
             issueUrl,
             latestUserActivity,
-            contentUrls
+            List.of()
         );
 
         activity.addMetadata("issueType", issueType);

@@ -225,10 +225,7 @@ If `users` is omitted, the tool uses the token owner (current behavior).
 5. Select the **Jira** app, then add these scopes:
    - `read:jira-work` — issue search, details, changelogs
    - `read:jira-user` — user information (needed for activity attribution)
-   - `read:dev-info:jira` — *(optional)* linked pull requests from GitHub integration
 6. Copy token and store securely
-
-The `read:dev-info:jira` scope enables detection of PRs linked through the Jira-GitHub integration (the "Development" panel). Without it, the tool still works but cannot distinguish CODE vs DISCUSS activities based on linked PRs.
 
 The tool automatically resolves the Atlassian Cloud API gateway URL from your instance URL, so no additional configuration is needed.
 
