@@ -25,15 +25,11 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
 
-/**
- * JIRA Activity Provider supporting multiple instances
- */
 public class JiraProvider implements ActivityProvider {
     private final List<JiraInstance> instances;
 
     private static final String ATLASSIAN_API_GATEWAY = "https://api.atlassian.com/ex/jira/";
 
-    // Jira returns timestamps like "2026-09-25T10:46:25.588-0700" (no colon in offset)
     private static final DateTimeFormatter JIRA_TIMESTAMP = new DateTimeFormatterBuilder()
             .append(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
             .appendOffset("+HHmm", "Z")
@@ -55,7 +51,6 @@ public class JiraProvider implements ActivityProvider {
                         instance.defaultProject().orElse(null)
                     ));
 
-                    // Register this instance for URL extraction
                     List<String> projectKeys = instance.projectKeys().orElse(List.of());
                     urlExtractor.registerJiraInstance(instance.url(), instance.name(), projectKeys);
                 }
@@ -114,18 +109,8 @@ public class JiraProvider implements ActivityProvider {
         ProgressLog.section("%s", instance.name);
 
         ProgressLog.indented(() -> {
-            // Resolve cloudId to use the Atlassian API gateway (required for scoped API tokens)
-            var cloudId = resolveCloudId(instance.url);
-            URI apiBaseUri;
-            if (cloudId.isPresent()) {
-                apiBaseUri = URI.create(ATLASSIAN_API_GATEWAY + cloudId.get());
-                ProgressLog.detail("Using Atlassian Cloud API gateway");
-            } else {
-                apiBaseUri = URI.create(instance.url);
-                ProgressLog.detail("Using direct instance URL");
-            }
+            URI apiBaseUri = resolveApiBaseUri(instance.url);
 
-            // Build REST client for this instance
             var client = QuarkusRestClientBuilder.newBuilder()
                 .baseUri(apiBaseUri)
                 .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
@@ -135,123 +120,18 @@ public class JiraProvider implements ActivityProvider {
                 .clientLogger(new TraceClientLogger())
                 .build(JiraRestClient.class);
 
-            // Resolve current user's accountId for activity matching and JQL
             String currentAccountId = client.myself().get("accountId").asText();
 
-            // Build JQL query - updatedBy finds all issues the user touched (comments, transitions, etc.)
-            DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneId.systemDefault());
-            var jql = String.format(
-                    "issue in updatedBy(\"%s\", \"%s\") ORDER BY updated DESC",
-                    currentAccountId, dateFormatter.format(startDate));
+            var issues = searchIssues(client, currentAccountId, startDate);
 
-            // Build request body - expand changelog and renderedFields, include comments
-            ObjectMapper mapper = new ObjectMapper();
-            ObjectNode request = mapper.createObjectNode();
-            request.put("jql", jql);
-            request.putArray("fields").add("key").add("summary").add("status").add("updated").add("issuetype").add("comment");
-            request.put("maxResults", 100);
-            request.put("expand", "changelog,renderedFields");
-
-            // Make API call
-            var root = client.search(request);
-            var issues = root.get("issues");
-
-            if (issues != null && issues.isArray()) {
-                for (JsonNode issue : issues) {
-                    String key = issue.get("key").asText();
-
-                    try {
-                        String summary = issue.get("fields").get("summary").asText();
-                        String issueType = issue.get("fields").get("issuetype").get("name").asText();
-                        String status = issue.get("fields").get("status").get("name").asText();
-                        String issueUrl = instance.url + "/browse/" + key;
-
-                        // Track user's latest activity in the time period
-                        Instant latestUserActivity = null;
-
-                        // Parse changelog to find user's actions during the time period
-                        var changelog = issue.get("changelog");
-                        if (changelog != null && changelog.get("histories") != null) {
-                            for (JsonNode history : changelog.get("histories")) {
-                                String createdStr = history.get("created").asText();
-                                Instant changeDate = OffsetDateTime.parse(createdStr, JIRA_TIMESTAMP).toInstant();
-
-                                if (changeDate.isBefore(startDate) || changeDate.isAfter(endDate)) {
-                                    continue;
-                                }
-
-                                var author = history.get("author");
-                                if (author != null && currentAccountId.equals(
-                                        author.path("accountId").asText(null))) {
-                                    if (latestUserActivity == null || changeDate.isAfter(latestUserActivity)) {
-                                        latestUserActivity = changeDate;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Parse comments to find user's comments during the time period
-                        var commentField = issue.get("fields").get("comment");
-                        if (commentField != null && commentField.get("comments") != null) {
-                            for (JsonNode comment : commentField.get("comments")) {
-                                String createdStr = comment.get("created").asText();
-                                Instant commentDate = OffsetDateTime.parse(createdStr, JIRA_TIMESTAMP).toInstant();
-
-                                if (commentDate.isBefore(startDate) || commentDate.isAfter(endDate)) {
-                                    continue;
-                                }
-
-                                var author = comment.get("author");
-                                if (author != null && currentAccountId.equals(
-                                        author.path("accountId").asText(null))) {
-                                    if (latestUserActivity == null || commentDate.isAfter(latestUserActivity)) {
-                                        latestUserActivity = commentDate;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Extract external URLs from summary and rendered description
-                        Set<String> externalUrls = new java.util.LinkedHashSet<>();
-                        urlExtractor.extractExternalUrls(summary, externalUrls);
-
-                        // Extract from description
-                        var renderedFields = issue.get("renderedFields");
-                        if (renderedFields != null && renderedFields.get("description") != null) {
-                            String description = renderedFields.get("description").asText();
-                            urlExtractor.extractExternalUrls(description, externalUrls);
-                        }
-
-                        List<String> contentUrls = new ArrayList<>(externalUrls);
-                        boolean hasPrUrls = !externalUrls.isEmpty();
-
-                        // Only create activity if user had activity during the time period
-                        if (latestUserActivity != null) {
-                            ActionCategory actionCategory = hasPrUrls ? ActionCategory.CODE : ActionCategory.DISCUSS;
-
-                            Activity activity = new Activity(
-                                "JIRA - " + instance.name,
-                                "issue",
-                                actionCategory,
-                                key + ": " + summary,
-                                "Type: " + issueType + ", Status: " + status,
-                                issueUrl,
-                                latestUserActivity,
-                                contentUrls
-                            );
-
-                            activity.addMetadata("issueType", issueType);
-                            activity.addMetadata("status", status);
-
-                            if (instance.defaultProject != null) {
-                                activity.addMetadata("defaultProject", instance.defaultProject);
-                            }
-
-                            activities.add(activity);
-                        }
-                    } catch (Exception e) {
-                        Log.tracef("Failed to fetch details for issue %s: %s", key, e.getMessage());
+            for (JsonNode issue : issues) {
+                try {
+                    var activity = toActivity(issue, instance, currentAccountId, startDate, endDate, urlExtractor);
+                    if (activity != null) {
+                        activities.add(activity);
                     }
+                } catch (Exception e) {
+                    Log.tracef("Failed to process issue %s: %s", issue.path("key").asText(), e.getMessage());
                 }
             }
         });
@@ -259,5 +139,184 @@ public class JiraProvider implements ActivityProvider {
         ProgressLog.result("Found %d activities", activities.size());
 
         return activities;
+    }
+
+    private URI resolveApiBaseUri(String instanceUrl) {
+        var cloudId = resolveCloudId(instanceUrl);
+        if (cloudId.isPresent()) {
+            ProgressLog.detail("Using Atlassian Cloud API gateway");
+            return URI.create(ATLASSIAN_API_GATEWAY + cloudId.get());
+        }
+        ProgressLog.detail("Using direct instance URL");
+        return URI.create(instanceUrl);
+    }
+
+    private List<JsonNode> searchIssues(JiraRestClient client, String currentAccountId, Instant startDate) {
+        DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneId.systemDefault());
+        var jql = String.format(
+                "issue in updatedBy(\"%s\", \"%s\") ORDER BY updated DESC",
+                currentAccountId, dateFormatter.format(startDate));
+
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode request = mapper.createObjectNode();
+        request.put("jql", jql);
+        request.putArray("fields")
+                .add("key").add("summary").add("status").add("updated")
+                .add("issuetype").add("comment").add("assignee");
+        request.put("maxResults", 100);
+        request.put("expand", "changelog,renderedFields");
+
+        var root = client.search(request);
+        var issuesNode = root.get("issues");
+
+        List<JsonNode> issues = new ArrayList<>();
+        if (issuesNode != null && issuesNode.isArray()) {
+            for (JsonNode issue : issuesNode) {
+                issues.add(issue);
+            }
+        }
+        return issues;
+    }
+
+    private Activity toActivity(JsonNode issue, JiraInstance instance, String currentAccountId,
+                                Instant startDate, Instant endDate, UrlExtractor urlExtractor) {
+        String key = issue.get("key").asText();
+        var fields = issue.get("fields");
+        String summary = fields.get("summary").asText();
+        String issueType = fields.get("issuetype").get("name").asText();
+        String status = fields.get("status").get("name").asText();
+        String issueUrl = instance.url + "/browse/" + key;
+
+        Instant latestUserActivity = findLatestUserActivity(issue, currentAccountId, startDate, endDate);
+        if (latestUserActivity == null) {
+            return null;
+        }
+
+        boolean isAssignee = isAssignedTo(fields, currentAccountId);
+        boolean isInProgress = "indeterminate".equals(
+                fields.get("status").path("statusCategory").path("key").asText(""));
+
+        ActionCategory actionCategory =
+                isAssignee && isInProgress
+                        ? ActionCategory.CODE : ActionCategory.DISCUSS;
+
+        List<String> contentUrls = extractContentUrls(issue, currentAccountId, startDate, endDate, urlExtractor);
+
+        Activity activity = new Activity(
+            "JIRA - " + instance.name,
+            "issue",
+            actionCategory,
+            key + ": " + summary,
+            "Type: " + issueType + ", Status: " + status,
+            issueUrl,
+            latestUserActivity,
+            contentUrls
+        );
+
+        activity.addMetadata("issueType", issueType);
+        activity.addMetadata("status", status);
+        if (instance.defaultProject != null) {
+            activity.addMetadata("defaultProject", instance.defaultProject);
+        }
+
+        return activity;
+    }
+
+    private List<String> extractContentUrls(JsonNode issue, String currentAccountId,
+                                             Instant startDate, Instant endDate,
+                                             UrlExtractor urlExtractor) {
+        Set<String> urls = new LinkedHashSet<>();
+        var fields = issue.get("fields");
+        var renderedFields = issue.get("renderedFields");
+
+        // Extract from title
+        urlExtractor.extractExternalUrls(fields.get("summary").asText(), urls);
+
+        // Extract from rendered description (HTML)
+        if (renderedFields != null && renderedFields.has("description") && !renderedFields.get("description").isNull()) {
+            urlExtractor.extractExternalUrls(renderedFields.get("description").asText(), urls);
+        }
+
+        // Extract from rendered comments by the current user in the time range
+        // (raw comment bodies are ADF JSON; rendered ones are HTML)
+        var renderedComments = renderedFields != null
+                ? renderedFields.path("comment").path("comments") : null;
+        var rawComments = fields.path("comment").path("comments");
+        if (renderedComments != null && renderedComments.isArray() && rawComments.isArray()) {
+            for (int i = 0; i < rawComments.size() && i < renderedComments.size(); i++) {
+                var rawComment = rawComments.get(i);
+                Instant commentDate = parseJiraTimestamp(rawComment.get("created").asText());
+                if (commentDate.isBefore(startDate) || commentDate.isAfter(endDate)) {
+                    continue;
+                }
+                var author = rawComment.get("author");
+                if (author != null && currentAccountId.equals(author.path("accountId").asText(null))) {
+                    String renderedBody = renderedComments.get(i).path("body").asText(null);
+                    if (renderedBody != null) {
+                        urlExtractor.extractExternalUrls(renderedBody, urls);
+                    }
+                }
+            }
+        }
+
+        return new ArrayList<>(urls);
+    }
+
+    private Instant findLatestUserActivity(JsonNode issue, String currentAccountId,
+                                           Instant startDate, Instant endDate) {
+        Instant latest = null;
+        latest = findLatestInChangelog(issue.get("changelog"), currentAccountId, startDate, endDate, latest);
+        latest = findLatestInComments(issue.get("fields").get("comment"), currentAccountId, startDate, endDate, latest);
+        return latest;
+    }
+
+    private Instant findLatestInChangelog(JsonNode changelog, String currentAccountId,
+                                          Instant startDate, Instant endDate, Instant latest) {
+        if (changelog == null || changelog.get("histories") == null) {
+            return latest;
+        }
+        for (JsonNode history : changelog.get("histories")) {
+            Instant changeDate = parseJiraTimestamp(history.get("created").asText());
+            if (changeDate.isBefore(startDate) || changeDate.isAfter(endDate)) {
+                continue;
+            }
+            var author = history.get("author");
+            if (author != null && currentAccountId.equals(author.path("accountId").asText(null))) {
+                if (latest == null || changeDate.isAfter(latest)) {
+                    latest = changeDate;
+                }
+            }
+        }
+        return latest;
+    }
+
+    private Instant findLatestInComments(JsonNode commentField, String currentAccountId,
+                                          Instant startDate, Instant endDate, Instant latest) {
+        if (commentField == null || commentField.get("comments") == null) {
+            return latest;
+        }
+        for (JsonNode comment : commentField.get("comments")) {
+            Instant commentDate = parseJiraTimestamp(comment.get("created").asText());
+            if (commentDate.isBefore(startDate) || commentDate.isAfter(endDate)) {
+                continue;
+            }
+            var author = comment.get("author");
+            if (author != null && currentAccountId.equals(author.path("accountId").asText(null))) {
+                if (latest == null || commentDate.isAfter(latest)) {
+                    latest = commentDate;
+                }
+            }
+        }
+        return latest;
+    }
+
+    private static boolean isAssignedTo(JsonNode fields, String accountId) {
+        var assignee = fields.get("assignee");
+        return assignee != null && !assignee.isNull()
+                && accountId.equals(assignee.path("accountId").asText(null));
+    }
+
+    private static Instant parseJiraTimestamp(String timestamp) {
+        return OffsetDateTime.parse(timestamp, JIRA_TIMESTAMP).toInstant();
     }
 }
