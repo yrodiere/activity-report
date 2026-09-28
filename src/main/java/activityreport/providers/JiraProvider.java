@@ -18,9 +18,9 @@ import io.quarkus.logging.Log;
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 
 import java.net.URI;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
@@ -135,16 +135,14 @@ public class JiraProvider implements ActivityProvider {
                 .clientLogger(new TraceClientLogger())
                 .build(JiraRestClient.class);
 
-            // Resolve current user's accountId for activity matching
+            // Resolve current user's accountId for activity matching and JQL
             String currentAccountId = client.myself().get("accountId").asText();
 
-            // Build JQL query - find all issues the user was involved in
-            long daysAgo = Duration.between(startDate, Instant.now()).toDays();
+            // Build JQL query - updatedBy finds all issues the user touched (comments, transitions, etc.)
+            DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneId.systemDefault());
             var jql = String.format(
-                    "(assignee = currentUser() OR reporter = currentUser()"
-                    + " OR creator = currentUser() OR watcher = currentUser())"
-                    + " AND updated >= -%dd ORDER BY updated DESC",
-                    daysAgo + 1);
+                    "issue in updatedBy(\"%s\", \"%s\") ORDER BY updated DESC",
+                    currentAccountId, dateFormatter.format(startDate));
 
             // Build request body - expand changelog and renderedFields, include comments
             ObjectMapper mapper = new ObjectMapper();
