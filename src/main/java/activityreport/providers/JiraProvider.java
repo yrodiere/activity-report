@@ -135,6 +135,9 @@ public class JiraProvider implements ActivityProvider {
                 .clientLogger(new TraceClientLogger())
                 .build(JiraRestClient.class);
 
+            // Resolve current user's accountId for activity matching
+            String currentAccountId = client.myself().get("accountId").asText();
+
             // Build JQL query - find all issues the user was involved in
             long daysAgo = Duration.between(startDate, Instant.now()).toDays();
             var jql = String.format(
@@ -143,11 +146,11 @@ public class JiraProvider implements ActivityProvider {
                     + " AND updated >= -%dd ORDER BY updated DESC",
                     daysAgo + 1);
 
-            // Build request body - expand changelog and renderedFields
+            // Build request body - expand changelog and renderedFields, include comments
             ObjectMapper mapper = new ObjectMapper();
             ObjectNode request = mapper.createObjectNode();
             request.put("jql", jql);
-            request.putArray("fields").add("key").add("summary").add("status").add("updated").add("issuetype");
+            request.putArray("fields").add("key").add("summary").add("status").add("updated").add("issuetype").add("comment");
             request.put("maxResults", 100);
             request.put("expand", "changelog,renderedFields");
 
@@ -175,20 +178,36 @@ public class JiraProvider implements ActivityProvider {
                                 String createdStr = history.get("created").asText();
                                 Instant changeDate = OffsetDateTime.parse(createdStr, JIRA_TIMESTAMP).toInstant();
 
-                                // Skip if outside date range
                                 if (changeDate.isBefore(startDate) || changeDate.isAfter(endDate)) {
                                     continue;
                                 }
 
-                                // Check if this change was made by the current user (by email)
                                 var author = history.get("author");
-                                if (author != null && author.get("emailAddress") != null) {
-                                    String authorEmail = author.get("emailAddress").asText();
-                                    if (instance.email.equals(authorEmail)) {
-                                        // Update latest activity timestamp
-                                        if (latestUserActivity == null || changeDate.isAfter(latestUserActivity)) {
-                                            latestUserActivity = changeDate;
-                                        }
+                                if (author != null && currentAccountId.equals(
+                                        author.path("accountId").asText(null))) {
+                                    if (latestUserActivity == null || changeDate.isAfter(latestUserActivity)) {
+                                        latestUserActivity = changeDate;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Parse comments to find user's comments during the time period
+                        var commentField = issue.get("fields").get("comment");
+                        if (commentField != null && commentField.get("comments") != null) {
+                            for (JsonNode comment : commentField.get("comments")) {
+                                String createdStr = comment.get("created").asText();
+                                Instant commentDate = OffsetDateTime.parse(createdStr, JIRA_TIMESTAMP).toInstant();
+
+                                if (commentDate.isBefore(startDate) || commentDate.isAfter(endDate)) {
+                                    continue;
+                                }
+
+                                var author = comment.get("author");
+                                if (author != null && currentAccountId.equals(
+                                        author.path("accountId").asText(null))) {
+                                    if (latestUserActivity == null || commentDate.isAfter(latestUserActivity)) {
+                                        latestUserActivity = commentDate;
                                     }
                                 }
                             }
@@ -210,7 +229,6 @@ public class JiraProvider implements ActivityProvider {
 
                         // Only create activity if user had activity during the time period
                         if (latestUserActivity != null) {
-                            // Determine action category: if there are PR URLs, it's code work, otherwise discuss
                             ActionCategory actionCategory = hasPrUrls ? ActionCategory.CODE : ActionCategory.DISCUSS;
 
                             Activity activity = new Activity(
@@ -227,7 +245,6 @@ public class JiraProvider implements ActivityProvider {
                             activity.addMetadata("issueType", issueType);
                             activity.addMetadata("status", status);
 
-                            // Add default project if configured
                             if (instance.defaultProject != null) {
                                 activity.addMetadata("defaultProject", instance.defaultProject);
                             }

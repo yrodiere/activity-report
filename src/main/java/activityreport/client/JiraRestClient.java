@@ -20,4 +20,8 @@ public interface JiraRestClient {
     @POST
     @Path("/search/jql")
     JsonNode search(ObjectNode request);
+
+    @GET
+    @Path("/myself")
+    JsonNode myself();
 }
