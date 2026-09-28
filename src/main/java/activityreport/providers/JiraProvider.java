@@ -126,7 +126,7 @@ public class JiraProvider implements ActivityProvider {
 
             for (JsonNode issue : issues) {
                 try {
-                    var activity = toActivity(issue, instance, currentAccountId, startDate, endDate);
+                    var activity = toActivity(issue, instance, currentAccountId, startDate, endDate, urlExtractor);
                     if (activity != null) {
                         activities.add(activity);
                     }
@@ -179,7 +179,7 @@ public class JiraProvider implements ActivityProvider {
     }
 
     private Activity toActivity(JsonNode issue, JiraInstance instance, String currentAccountId,
-                                Instant startDate, Instant endDate) {
+                                Instant startDate, Instant endDate, UrlExtractor urlExtractor) {
         String key = issue.get("key").asText();
         var fields = issue.get("fields");
         String summary = fields.get("summary").asText();
@@ -196,11 +196,11 @@ public class JiraProvider implements ActivityProvider {
         boolean isInProgress = "indeterminate".equals(
                 fields.get("status").path("statusCategory").path("key").asText(""));
 
-        // CODE: user is assignee AND issue is in progress
-        // DISCUSS: everything else (user participated but isn't doing the code work)
         ActionCategory actionCategory =
                 isAssignee && isInProgress
                         ? ActionCategory.CODE : ActionCategory.DISCUSS;
+
+        List<String> contentUrls = extractContentUrls(issue, currentAccountId, startDate, endDate, urlExtractor);
 
         Activity activity = new Activity(
             "JIRA - " + instance.name,
@@ -210,7 +210,7 @@ public class JiraProvider implements ActivityProvider {
             "Type: " + issueType + ", Status: " + status,
             issueUrl,
             latestUserActivity,
-            List.of()
+            contentUrls
         );
 
         activity.addMetadata("issueType", issueType);
@@ -220,6 +220,46 @@ public class JiraProvider implements ActivityProvider {
         }
 
         return activity;
+    }
+
+    private List<String> extractContentUrls(JsonNode issue, String currentAccountId,
+                                             Instant startDate, Instant endDate,
+                                             UrlExtractor urlExtractor) {
+        Set<String> urls = new LinkedHashSet<>();
+        var fields = issue.get("fields");
+        var renderedFields = issue.get("renderedFields");
+
+        // Extract from title
+        urlExtractor.extractExternalUrls(fields.get("summary").asText(), urls);
+
+        // Extract from rendered description (HTML)
+        if (renderedFields != null && renderedFields.has("description") && !renderedFields.get("description").isNull()) {
+            urlExtractor.extractExternalUrls(renderedFields.get("description").asText(), urls);
+        }
+
+        // Extract from rendered comments by the current user in the time range
+        // (raw comment bodies are ADF JSON; rendered ones are HTML)
+        var renderedComments = renderedFields != null
+                ? renderedFields.path("comment").path("comments") : null;
+        var rawComments = fields.path("comment").path("comments");
+        if (renderedComments != null && renderedComments.isArray() && rawComments.isArray()) {
+            for (int i = 0; i < rawComments.size() && i < renderedComments.size(); i++) {
+                var rawComment = rawComments.get(i);
+                Instant commentDate = parseJiraTimestamp(rawComment.get("created").asText());
+                if (commentDate.isBefore(startDate) || commentDate.isAfter(endDate)) {
+                    continue;
+                }
+                var author = rawComment.get("author");
+                if (author != null && currentAccountId.equals(author.path("accountId").asText(null))) {
+                    String renderedBody = renderedComments.get(i).path("body").asText(null);
+                    if (renderedBody != null) {
+                        urlExtractor.extractExternalUrls(renderedBody, urls);
+                    }
+                }
+            }
+        }
+
+        return new ArrayList<>(urls);
     }
 
     private Instant findLatestUserActivity(JsonNode issue, String currentAccountId,
