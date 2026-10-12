@@ -27,7 +27,7 @@ public class AIProcessor {
     public AIProcessor(AppConfig config) {
         String aiUrl = config.ai()
             .flatMap(ai -> ai.url())
-            .orElse("http://localhost:8000/v1");
+            .orElseThrow(() -> new IllegalStateException("AI URL not configured"));
 
         // Build REST client
         this.client = QuarkusRestClientBuilder.newBuilder()

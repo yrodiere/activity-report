@@ -238,7 +238,7 @@ public class ActivityReportCommand implements Runnable {
 
             // Process with AI or simple grouping
             List<ActivityGroup> groups;
-            if (noAi) {
+            if (noAi || config.ai().isEmpty()) {
                 ProgressLog.section("Grouping activities (simple URL-based)...");
                 groups = SimpleGrouper.groupActivities(classifiedActivities);
             } else {

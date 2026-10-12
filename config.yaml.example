@@ -49,10 +49,10 @@ providers:
       #   api_key: "op://Private/Zulip/api_key"
       #   default-project: "Quarkus"
 
-# AI Configuration (for intelligent report grouping)
-ai:
-  url: "http://localhost:8000/v1"  # Podman AI Lab default endpoint
-  model: "auto"  # auto-detect from API, or specify model name
+# AI Configuration (optional, for intelligent report grouping)
+# ai:
+#   url: "http://localhost:8000/v1"  # OpenAI-compatible endpoint (e.g. Podman AI Lab)
+#   model: "auto"  # auto-detect from API, or specify model name
 
 # Project classification (organizes report by projects based on URL patterns)
 projects:
