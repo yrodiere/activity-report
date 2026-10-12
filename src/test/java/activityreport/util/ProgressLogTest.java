@@ -178,9 +178,8 @@ class ProgressLogTest {
         System.out.println(ProgressLog.formatLine(colors, 0, "▶", ProgressLog.BOLD + ProgressLog.CYAN, "Classifying activities into projects..."));
         System.out.println();
 
-        // AI warning
-        System.out.println(ProgressLog.formatLine(colors, 0, "⚠", ProgressLog.YELLOW, "Could not auto-detect AI model: Connection refused: localhost/127.0.0.1:8000"));
-        System.out.println(ProgressLog.formatLine(colors, 0, "⚠", ProgressLog.YELLOW, "AI model not available, falling back to simple grouping"));
+        // Grouping
+        System.out.println(ProgressLog.formatLine(colors, 0, "▶", ProgressLog.BOLD + ProgressLog.CYAN, "Grouping activities (simple URL-based)..."));
         System.out.println();
 
         // Generate

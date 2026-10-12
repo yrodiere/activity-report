@@ -207,7 +207,7 @@ public class JiraProvider implements ActivityProvider {
             "issue",
             actionCategory,
             key + ": " + summary,
-            "Type: " + issueType + ", Status: " + status,
+            null,
             issueUrl,
             latestUserActivity,
             contentUrls
