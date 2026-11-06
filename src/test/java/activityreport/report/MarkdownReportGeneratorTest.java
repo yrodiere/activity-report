@@ -308,6 +308,28 @@ class MarkdownReportGeneratorTest {
     }
 
     @Test
+    void prStatusPrefixRenderedOnSecondaryActivities() {
+        Activity primary = new Activity("GitHub", "pull_request", ActionCategory.CODE,
+                "Main PR", null, "https://github.com/r/pull/1", NOW,
+                List.of(), "Alpha", new HashMap<>(Map.of("prStatus", "Merged")));
+        Activity secondary = new Activity("GitHub", "pull_request", ActionCategory.CODE,
+                "Related PR", null, "https://github.com/r/pull/2", NOW,
+                List.of(), "Alpha", new HashMap<>(Map.of("prStatus", "Continued")));
+        Activity secondaryNoStatus = new Activity("GitHub", "issue", ActionCategory.CODE,
+                "An issue", null, "https://github.com/r/issues/3", NOW,
+                List.of(), "Alpha", new HashMap<>());
+
+        var groups = List.of(
+                new ActivityGroup(primary, List.of(secondary, secondaryNoStatus)));
+
+        String report = MarkdownReportGenerator.generate(groups, List.of("Alpha"));
+
+        assertThat(report).contains("* [Merged] [Main PR](https://github.com/r/pull/1)");
+        assertThat(report).contains("    * [Continued] [Related PR](https://github.com/r/pull/2)");
+        assertThat(report).contains("    * [An issue](https://github.com/r/issues/3)");
+    }
+
+    @Test
     void noPrefixWithoutPrStatus() {
         var groups = List.of(
                 new ActivityGroup(

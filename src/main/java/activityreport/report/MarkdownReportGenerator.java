@@ -126,10 +126,15 @@ public class MarkdownReportGenerator {
 
         // Add secondary activities as nested list items
         for (Activity secondary : group.secondary()) {
+            String secStatusPrefix = "";
+            Object secPrStatus = secondary.metadata().get("prStatus");
+            if (secPrStatus instanceof String s) {
+                secStatusPrefix = "[" + s + "] ";
+            }
             if (secondary.url() != null && !secondary.url().isEmpty()) {
-                report.append(String.format("    * [%s](%s)\n", secondary.title(), secondary.url()));
+                report.append(String.format("    * %s[%s](%s)\n", secStatusPrefix, secondary.title(), secondary.url()));
             } else {
-                report.append(String.format("    * %s\n", secondary.title()));
+                report.append(String.format("    * %s%s\n", secStatusPrefix, secondary.title()));
             }
         }
     }
